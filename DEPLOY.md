@@ -66,3 +66,12 @@ Untuk database yang sudah memakai seluruh migrasi commerce sebelumnya, jalankan 
 Import link foto Excel ke `product_variants.photo_url` dengan mencocokkan ID varian atau SKU yang unik dalam produk, bukan nama produk saja. Jangan overwrite foto existing dengan sel Excel kosong. Pastikan link adalah URL gambar http/https langsung yang bisa diakses publik. Jika importer versi deployed memakai nama kolom lain, petakan kolom itu terlebih dahulu. Link website saja tidak cukup untuk mengetahui isi Excel atau mengisi foto yang belum tersimpan.
 
 Cek sesudah update: pilih dua varian dengan foto berbeda di katalog publik, pastikan foto dan harga ikut berubah; link kosong/rusak kembali ke foto produk. Cek harga dan profit satu varian terhadap modalnya dan pastikan invoice/order lama tetap sama. Informasi modal/profit tidak ditambahkan ke RPC katalog publik.
+
+
+### Foto spreadsheet yang sudah dicocokkan ke data live
+
+Pada 14 September, katalog publik live berisi 31 produk/61 varian; data ini sudah berbeda dari commit main meskipun frontend masih sama. Setelah migrasi fitur foto di atas, jalankan `supabase/data/20260914_catalogue_variant_photos.sql` untuk mengisi 15 foto Tudungruffle (7 shawl, 8 square). Semua 15 URL merespons sebagai gambar saat diperiksa. Script memeriksa ID produk, ID varian, nama, dan SKU; seluruh transaksi dibatalkan jika tujuan tidak cocok. Foto yang sudah terisi tetap dipertahankan, dan pengulangan tidak membuat duplikat. Script diuji memakai salinan metadata varian live dalam database lokal.
+
+Sumber: https://docs.google.com/spreadsheets/d/1j-KXMU8ddKaRckwlmuYUfr4AWbjoL940OKC4VNfONSs/edit
+
+Tujuh Blackmores cocok secara data tetapi URL foto Watsons menolak pemeriksaan dengan HTTP 403, sehingga tidak disertakan dalam import otomatis. Ini belum membuktikan link selalu gagal di browser pengguna. Enam halaman Padini yang tercantum mengembalikan HTTP 404; 18 varian Padini memerlukan link foto per style yang benar. Jangan memasukkan URL halaman HTML ke photo_url. Kelompok lain di spreadsheet belum terlihat dalam respons katalog publik; jangan membuat produk/varian duplikat berdasarkan ketidakhadiran di respons publik.
