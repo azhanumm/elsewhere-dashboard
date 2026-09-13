@@ -35,3 +35,14 @@
  .catalogue-workspace .catalogue-row > strong::before { content:'Harga jual · '; font-size:10px; color:var(--muted); }
  .catalogue-workspace .edit-product-button { min-height:42px; }
 }
+
+.variant-profit { display:grid;gap:5px; }
+.variant-profit small,.catalogue-profit { display:block;font-size:11px;font-weight:400;color:#62515b;line-height:1.5; }
+.variant-photo-list { display:grid;gap:12px;margin:16px 0; }
+.variant-photo-row { display:flex;align-items:center;gap:16px;padding:12px;border:1px solid var(--line);border-radius:10px; }
+.variant-photo-preview { width:76px;height:88px;flex-shrink:0;overflow:hidden;background:#f5eff1;border-radius:7px; }
+.variant-photo-preview img { width:100%;height:100%;object-fit:cover; }
+.variant-photo-preview > div { font-size:9px;display:grid;place-items:center;height:100%;text-align:center; }
+.variant-photo-row label { display:grid;gap:7px;min-width:0;flex:1;font-size:13px; }
+.variant-photo-row input { width:100%;min-width:0;min-height:40px;border:1px solid var(--line);border-radius:6px;padding:8px; }
+.variant-photo-row small { color:var(--muted);font-size:11px;line-height:1.5; }

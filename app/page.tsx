@@ -28,6 +28,7 @@ import {
 import { supabase } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 import Landing from "./landing";
+import ProductPhoto from "../components/product-photo";
 import "./catalogue-dashboard.css";
 import { filterCatalogue, catalogueCategoryNames, type CatalogueStatus } from "../lib/catalogue-search";
 import OrdersPanel from "../components/orders-panel";
@@ -87,7 +88,7 @@ type Product = {
   fashion_cargo_per_kg:number;
   nonfashion_cargo_per_kg:number;
 };
-type Variant={id:string;product_id:string;name:string;sku:string;local_price:number;weight_grams:number;stock:number;active:boolean;sale_mode:"stock"|"preorder";preorder_capacity:number|null};
+type Variant={photo_url?:string|null;id:string;product_id:string;name:string;sku:string;local_price:number;weight_grams:number;stock:number;active:boolean;sale_mode:"stock"|"preorder";preorder_capacity:number|null};
 type ProductCategory={id:string;name:string;default_margin_percent:number;active:boolean};
 type Trip = {
   code: string;
@@ -1496,15 +1497,18 @@ function Dashboard() {
                     <div><span>Harga barang</span><b>{format(productPricing(variantProduct).productCost)}</b></div>
                     <div><span>Cargo</span><b>{format(productPricing(variantProduct).cargo)}</b></div>
                     <div><span>Modal</span><b>{format(productPricing(variantProduct).capital)}</b></div>
-                    <div className="recommended"><span>Harga jual rekomendasi</span><strong>{format(productPricing(variantProduct).sell)}</strong></div>
+                    <div className="recommended"><span>Harga jual · pembulatan Rp1.000</span><strong>{format(productPricing(variantProduct).sell)}</strong></div>
+                    <div><span>Estimasi profit / unit</span><strong>{format(productPricing(variantProduct).profit)}</strong></div>
                   </div>
+                  <p className="modal-help">Profit = harga jual setelah pembulatan − modal barang − kargo. Belum dikurangi biaya operasional, ongkir domestik, dan biaya pembayaran.</p>
                 </article>
                 <article className="panel editor-section">
                   <div className="editor-section-title"><div><span>VARIAN PRODUK</span><h2>Ukuran, berat & harga</h2></div><small>Setiap varian dihitung terpisah</small></div>
                   <p className="modal-help">Isi harga dan berat setiap varian. Stok/kuota adalah jumlah total untuk trip ini, termasuk yang sudah dipesan. Preorder tanpa batas tidak memerlukan stok. Isi kuota hanya jika ingin membatasi pesanan.</p>
                   {variants.map(v => <div className="variant-availability" key={v.id}><strong>{v.name}</strong><label>Penjualan<select value={v.sale_mode} onChange={e => { updateVariant(v.id,"sale_mode",e.target.value); saveVariant(v.id,"sale_mode",e.target.value); }}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label><label>Kuota total PO<input type="number" min={0} step={1} value={v.preorder_capacity ?? ""} placeholder="Tanpa batas" onChange={e => updateVariant(v.id,"preorder_capacity",(e.target.value === "" ? null : Number(e.target.value)))} onBlur={e => saveVariant(v.id,"preorder_capacity",e.target.value === "" ? null : Number(e.target.value))}/></label><label><input type="checkbox" checked={v.active} onChange={e => { updateVariant(v.id,"active",e.target.checked); saveVariant(v.id,"active",e.target.checked); }}/> Aktif</label></div>)}
+                  <div className="variant-photo-list">{variants.map(v=><div className="variant-photo-row" key={v.id}><div className="variant-photo-preview"><ProductPhoto key={`${v.id}-${v.photo_url}`} variant={v} product={variantProduct} alt={`${variantProduct.name} — ${v.name}`}/></div><label>Foto · {v.name}<input type="url" aria-label={`Link foto ${v.name}`} value={v.photo_url || ''} placeholder="https://… (kosong = foto produk)" onChange={e=>updateVariant(v.id,'photo_url',e.target.value)} onBlur={e=>{const url=e.target.value.trim();if(url&&!/^https?:\/\//i.test(url)){setSyncStatus('Gunakan link foto http atau https');return;}saveVariant(v.id,'photo_url',url)}}/><small>Link foto varian dari Excel dapat disimpan di sini. Foto ini mengikuti pilihan varian di katalog.</small></label></div>)}</div>
                   <div className="variant-table-head"><span>Nama varian</span><span>Harga {currency}</span><span>Berat</span><span>Stok</span><span>Harga jual</span><span/></div>
-                  <div className="variant-list">{variants.map(v=>{const calc=productPricing({local_price:v.local_price,price_thb:v.local_price,weight_grams:v.weight_grams,category:variantProduct.category,margin_percent:variantProduct.margin_percent});return <div className="variant-row" key={v.id}><input value={v.name} onChange={e=>updateVariant(v.id,'name',e.target.value)} onBlur={e=>saveVariant(v.id,'name',e.target.value)} placeholder="Nama/ukuran"/><input type="number" value={v.local_price||''} onChange={e=>updateVariant(v.id,'local_price',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'local_price',Number(e.target.value))} placeholder={currency}/><input type="number" value={v.weight_grams||''} onChange={e=>updateVariant(v.id,'weight_grams',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'weight_grams',Number(e.target.value))} placeholder="gram"/><input type="number" value={v.stock||''} onChange={e=>updateVariant(v.id,'stock',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'stock',Number(e.target.value))} placeholder="stok"/><strong>{format(calc.sell)}</strong><button className="delete-expense" onClick={()=>deleteVariant(v.id)}><Trash2 size={15}/></button></div>})}</div>
+                  <div className="variant-list">{variants.map(v=>{const calc=productPricing({local_price:v.local_price,price_thb:v.local_price,weight_grams:v.weight_grams,category:variantProduct.category,margin_percent:variantProduct.margin_percent});return <div className="variant-row" key={v.id}><input value={v.name} onChange={e=>updateVariant(v.id,'name',e.target.value)} onBlur={e=>saveVariant(v.id,'name',e.target.value)} placeholder="Nama/ukuran"/><input type="number" value={v.local_price||''} onChange={e=>updateVariant(v.id,'local_price',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'local_price',Number(e.target.value))} placeholder={currency}/><input type="number" value={v.weight_grams||''} onChange={e=>updateVariant(v.id,'weight_grams',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'weight_grams',Number(e.target.value))} placeholder="gram"/><input type="number" value={v.stock||''} onChange={e=>updateVariant(v.id,'stock',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'stock',Number(e.target.value))} placeholder="stok"/><div className="variant-profit"><strong>Jual {format(calc.sell)}</strong><small>Modal {format(calc.capital)}</small><small>Profit {format(calc.profit)} / unit</small></div><button className="delete-expense" onClick={()=>deleteVariant(v.id)}><Trash2 size={15}/></button></div>})}</div>
                   <div className="variant-add"><input value={variantDraft.name} onChange={e=>setVariantDraft(x=>({...x,name:e.target.value}))} placeholder="Contoh: Size M"/><input type="number" value={variantDraft.local_price||''} onChange={e=>setVariantDraft(x=>({...x,local_price:Number(e.target.value)}))} placeholder={`Harga ${currency}`}/><input type="number" value={variantDraft.weight_grams||''} onChange={e=>setVariantDraft(x=>({...x,weight_grams:Number(e.target.value)}))} placeholder="Berat gram"/><input type="number" value={variantDraft.stock||''} onChange={e=>setVariantDraft(x=>({...x,stock:Number(e.target.value)}))} placeholder="Stok"/><button onClick={addVariant}><Plus size={14}/> Tambah varian</button></div>
                 </article>
                 <div className="editor-danger-zone"><button onClick={async()=>{await deleteProduct(variantProduct.id);closeProductEditor()}}><Trash2 size={14}/> Hapus produk</button></div>
@@ -1609,7 +1613,7 @@ function Dashboard() {
                             <span className="catalogue-pill">{p.category}</span>
                             <b>{currencySymbol}{Number(p.local_price||p.price_thb).toLocaleString("id-ID")}</b>
                             <span className={!p.weight_grams?"needs-data":""}>{p.weight_grams?`${p.weight_grams} g`:"Belum diisi"}</span>
-                            <strong>{format(calc.sell)}</strong>
+                            <strong>{format(calc.sell)}<small className="catalogue-profit">Modal {format(calc.capital)}<br/>Profit {format(calc.profit)} / unit</small></strong>
                             <span className={`status-badge ${p.status==="Ready"?"ready":""}`}>{p.status}</span>
                             <span className={`status-badge ${p.published?"live":""}`}>{p.published?"Tayang":"Belum tayang"}</span>
                             <button id={`catalogue-edit-${p.id}`} className="edit-product-button" aria-label={`Edit ${p.name}`} onClick={()=>openProductEditor(p)}><Pencil size={14}/> Edit</button>
@@ -2004,7 +2008,7 @@ function Dashboard() {
                 </div>
                 <div className="price-result">
                   <Plane size={20} />
-                  <span>Harga jual rekomendasi</span>
+                  <span>Harga jual · pembulatan Rp1.000</span>
                   <strong>{format(suggestedPrice)}</strong>
                   <p>
                     Target untung dipakai <b>{format(targetProfit)}</b> ·{" "}
