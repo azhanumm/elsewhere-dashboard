@@ -379,4 +379,80 @@ await test('existing viewers remain read-only despite old broad policies', async
  await assert.rejects(db.query('select commerce_record_payment($1,$2,$3,$4)', [crypto.randomUUID(),orderId,1,'Forbidden']), /owner\/editor/);
  await assert.rejects(db.query("insert into storage.objects(bucket_id,name) values('order-receipts','forbidden')"), /row-level security/);
 });
+await test('Malaysia settings and unlimited preorder migration preserve existing orders', async () => {
+ await owner();
+ const before = (await db.query('select count(*)::int as n from orders')).rows[0].n;
+ await db.exec(await readFile(new URL('../supabase/migrations/202609130001_preorder_and_rates.sql',import.meta.url),'utf8'));
+ const t=(await db.query('select * from trips')).rows[0];
+ assert.equal(t.name,'Malaysia trip'); assert.equal(Number(t.fashion_cargo_per_kg),90000); assert.equal(Number(t.nonfashion_cargo_per_kg),90000);
+ assert.equal((await db.query('select count(*)::int as n from orders')).rows[0].n,before);
+ await role('anon');
+ const c=await catalogue(); assert.equal(c[0].product_variants[0].available,null); assert.equal(c[0].product_variants[0].unit_price_idr,null);
+ await assert.rejects(place(), /Harga belum siap/);
+});
+const payload = (rate=3500, age=0) => ({result:'success',base_code:'MYR',time_last_update_unix:Math.floor(Date.now()/1000)-age,rates:{IDR:rate}});
+async function acceptRate(rate=3500){ await owner(); await db.query('select commerce_accept_rate($1,$2)', ['MYR',payload(rate)]); }
+const orderFor = async (phone, token=crypto.randomUUID(), quantity=20, expected=513500) => (await db.query('select commerce_place_order($1,$2,$3,$4,$5,$6,$7,$8) as data',[token,variant,quantity,expected,'Preorder Customer',phone,'Jalan Contoh 123, Makassar 90111',''])).rows[0].data;
+await test('FX responses are validated and clients cannot overwrite rates', async () => {
+ await acceptRate();
+ await assert.rejects(db.query('select commerce_accept_rate($1,$2)',['MYR',{...payload(),base_code:'USD'}]),/Invalid rate/);
+ await assert.rejects(db.query('select commerce_accept_rate($1,$2)',['MYR',payload(0)]),/Invalid or stale/);
+ await assert.rejects(db.query('select commerce_accept_rate($1,$2)',['MYR',payload(3500,49*3600)]),/Invalid or stale/);
+ await role('authenticated',member,'team@example.com');
+ await assert.rejects(db.query('select commerce_accept_rate($1,$2)',['MYR',payload(1)]),/permission denied/);
+ // Existing broad table policy cannot override the authoritative rate cache.
+ await owner(); await db.exec('update trips set exchange_rate_idr=1');
+ assert.equal(Number((await db.query('select exchange_rate_idr from trips')).rows[0].exchange_rate_idr),3500);
+ await role('anon'); assert.equal((await catalogue())[0].product_variants[0].unit_price_idr,513500);
+});
+let repeatToken=crypto.randomUUID(), unlimitedOrder;
+await test('unlimited preorder ignores stock but server throttles repeated submissions', async () => {
+ await role('anon');
+ unlimitedOrder=await orderFor('628111111111',repeatToken);
+ await orderFor('628111111111'); await orderFor('628111111111');
+ assert.equal((await catalogue())[0].product_variants[0].available,null);
+ await assert.rejects(orderFor('628111111111'),/Terlalu banyak/);
+ await assert.rejects(orderFor('08111111111'),/Terlalu banyak/);
+ assert.deepEqual(await orderFor('628111111111',repeatToken),unlimitedOrder);
+});
+await test('FX refresh updates catalogue prices but never existing order snapshots', async () => {
+ await acceptRate(3600); await role('anon');
+ assert.equal((await catalogue())[0].product_variants[0].unit_price_idr,526500);
+ await assert.rejects(orderFor('628222222222'),/Harga berubah/);
+ await owner();
+ const old=(await db.query('select total_idr from orders where order_code=$1',[unlimitedOrder.order_code])).rows[0]; assert.equal(Number(old.total_idr),513500*20);
+ await db.exec("update commerce_exchange_rates set source_updated_at=now()-interval '49 hours'");
+ await role('anon'); assert.equal((await catalogue())[0].product_variants[0].unit_price_idr,null);
+ await assert.rejects(orderFor('628222222222'),/Harga belum siap/);
+});
+await test('expiry cancels only unconfirmed orders without payment records', async () => {
+ await owner();
+ const rows=(await db.query("select id from orders where phone='628111111111' order by created_at,id")).rows;
+ await db.exec("update orders set created_at=now()-interval '49 hours' where phone='628111111111'");
+ await db.query("update orders set status='confirmed' where id=$1",[rows[1].id]);
+ await db.query("insert into order_payments(request_id,order_id,amount_idr,reference,created_by) values($1,$2,100,'Pending DP',$3)",[crypto.randomUUID(),rows[2].id,member]);
+ assert.equal((await db.query('select commerce_expire_unpaid_orders() as n')).rows[0].n,1);
+ assert.equal((await db.query('select status from orders where id=$1',[rows[0].id])).rows[0].status,'cancelled');
+ assert.equal((await db.query('select status from orders where id=$1',[rows[1].id])).rows[0].status,'confirmed');
+ assert.equal((await db.query('select status from orders where id=$1',[rows[2].id])).rows[0].status,'new');
+});
+await test('hourly infrastructure seeds rates and preserves last good rate on provider failure', async () => {
+ await owner();
+ await db.exec(`create schema extensions; create schema cron;
+ create table cron.test_jobs(name text, schedule text, command text);
+ create function cron.schedule(n text,s text,c text) returns bigint language plpgsql as $$ begin insert into cron.test_jobs values(n,s,c); return 1; end $$;
+ create function extensions.http_set_curlopt(n text,v text) returns boolean language sql as $$ select true $$;
+ create table extensions.test_response(status integer,content text);
+ create function extensions.http_get(url text) returns table(status integer,content text) language sql as $$ select * from extensions.test_response $$;`);
+ await db.query('insert into extensions.test_response values(200,$1)',[JSON.stringify(payload())]);
+ const scheduled=await readFile(new URL('../supabase/migrations/202609130002_scheduled_rates.sql',import.meta.url),'utf8');
+ // PGlite has no network/cron extensions; execute their actual caller against deterministic stand-ins.
+ await db.exec(scheduled.replace(/^create extension .*;$/gm,''));
+ assert.equal((await db.query('select count(*)::int as n from cron.test_jobs')).rows[0].n,2);
+ assert.equal(Number((await db.query("select commerce_current_rate('MYR') as r")).rows[0].r),3500);
+ await db.exec('update extensions.test_response set status=503'); await db.exec('select commerce_refresh_rates()');
+ assert.equal(Number((await db.query("select commerce_current_rate('MYR') as r")).rows[0].r),3500);
+ assert.ok((await db.query('select last_error from commerce_exchange_rates')).rows[0].last_error);
+ await role('anon'); await assert.rejects(db.query('select commerce_refresh_rates()'),/permission denied/);
+});
 await db.close();

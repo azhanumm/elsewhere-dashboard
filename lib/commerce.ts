@@ -2,7 +2,7 @@ export type CatalogueVariant = {
   id: string;
   name: string;
   sale_mode: 'stock' | 'preorder';
-  available: number;
+  available: number | null;
   unit_price_idr: number | null;
 };
 export type CatalogueProduct = {

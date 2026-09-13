@@ -25,15 +25,11 @@ npm run build:vercel
 
 ## Activate the database integration
 
-The code requires `supabase/migrations/202609120001_commerce.sql` applied **once** to the existing Supabase project. It does not include credentials and has not been applied to a hosted project as part of this change.
+Apply the three migrations in filename order during the same maintenance window as the matching frontend deployment. See [DEPLOY.md](DEPLOY.md) for the handoff, backup requirements and verification. Hosted migrations have not been applied by this change.
 
-1. Back up the existing database and inspect its schema/policies. The migration expects the existing `workspace_members`, `trips`, `trip_expenses`, `products`, `product_variants`, and `product_categories` tables used by this dashboard. It runs in one transaction and aborts if those definitions are incompatible. The core schema was absent from this repository; inspect the actual schema before applying.
-2. Apply the migration with a database administrator, or through the Supabase SQL editor. Deploy the matching frontend in the same maintenance window: anonymous raw-table access is removed and the old landing page will stop reading the catalogue after this migration.
-3. Existing members retain staff access through their authenticated email. Membership provisioning stays in the Supabase administrator workflow; signup alone grants no dashboard/data access. Existing workspace members can read commerce records; only existing owner/editor roles may record or verify payments and update orders. Existing write policies and their created_by checks are preserved.
-4. Configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and optionally `VITE_WHATSAPP_NUMBER` in local/Vercel environment settings; rebuild after changes. Allow the actual `/dashboard` URL in Supabase Auth redirect URLs for password resets.
-5. In the dashboard, select the trip. Set and **save its IDR exchange rate**; configure fashion and non-fashion cargo prices. External exchange-rate lookup is a suggestion only and never silently changes selling prices.
-6. Set the trip to **Open PO**. In each product's variant editor, set its sale mode, total stock or total preorder capacity, price, weight, and active flag. Publish the product. New preorder capacity defaults to zero; existing inventory is not guessed or converted.
-7. Test with a dedicated test trip: submit an order from a signed-out browser; verify it appears in Orders; record then verify a payment; progress status through confirmation, purchase, arrival and packing; pay the balance and enter courier/tracking before shipping. Verify that nonmembers cannot read orders, receipts, unpublished products or change membership.
+Existing members retain their access. Only owner/editor roles may mutate commerce records; signup alone does not grant membership. Configure the three public environment variables from `.env.example`, and allow the deployed `/dashboard` URL in Supabase Auth redirect URLs.
+
+Select **Malaysia trip**, set the trip to **Open PO**, and publish Ready products with active variants, valid price and weight. Existing trip statuses and product publication decisions are preserved. All existing variants are converted to unlimited preorder; new variants default to unlimited preorder. Both Malaysia cargo rates are Rp90,000/kg.
 
 The private `order-receipts` bucket limits uploads to 5 MB JPG/PNG/WEBP/PDF. Product photo uploads continue using the existing `product-images` bucket. Check that existing buckets and policies match this setup. Security-definer RPCs have a fixed search path and explicit execute grants; see the [Supabase function guidance](https://supabase.com/docs/guides/database/functions) and [Storage access-control documentation](https://supabase.com/docs/guides/storage/security/access-control).
 
@@ -42,9 +38,11 @@ The private `order-receipts` bucket limits uploads to 5 MB JPG/PNG/WEBP/PDF. Pro
 - Catalogue and checkout use the same database price function; dashboard calculations mirror it and are tested for parity. Product custom margin overrides the default (20% food/drinks; 25% otherwise). Fashion aliases include `Pakaian`, `Tas`, and `Sepatu`. Currency and both cargo rates come from the product's current trip.
 - The customer's submitted price is checked, never trusted. An order stores immutable product names, quantity, unit price, and pricing inputs. Future product/FX edits cannot rewrite that order's price.
 - Active variants from published Ready products in Open PO trips appear publicly. No cost price, margin, customer data or private trip finance is returned by the public catalogue RPC.
-- Stock/capacity means the total sellable allocation for the trip, **including units already ordered**. All noncancelled orders consume it, including completed orders. Do not enter “remaining stock” as the total allocation. Database row locks prevent simultaneous submissions overselling the allocation.
+- Unlimited preorder uses a null capacity and never sells out from stock counts. For optionally capped variants, stock/capacity means the total sellable allocation for the trip, **including units already ordered**. All noncancelled orders consume it, including completed orders. Do not enter “remaining stock” as the total allocation. Database row locks prevent simultaneous submissions overselling the allocation.
 - One order contains one variant with 1–20 units. Repeating a request token returns the original order without another reservation. Keep the form open and use retry after a network error.
-- New orders reserve capacity immediately and remain reserved until staff cancels them. Review unpaid/spam orders regularly; this version has no automatic expiry or bot challenge. Public traffic protection/rate limiting should be configured at the deployment boundary before a broad launch.
+- New orders expire after 48 hours if still new and without any payment records (hourly cleanup). Confirmed orders and orders with pending/verified payments are preserved.
+- Checkout permits three new orders per phone per 15 minutes, ten per day and 60 globally per minute. Retries of the same request do not consume another order. This is basic database throttling, not a CAPTCHA or protection against distributed abuse.
+- Supabase checks ExchangeRate-API hourly; the free provider updates daily. Catalogue prices follow fresh rates automatically, while saved orders retain their original price. Missing or over-48-hour-old rates block checkout. Clients cannot set the rate.
 
 ## Payments and fulfillment
 

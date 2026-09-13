@@ -85,7 +85,7 @@ type Product = {
   fashion_cargo_per_kg:number;
   nonfashion_cargo_per_kg:number;
 };
-type Variant={id:string;product_id:string;name:string;sku:string;local_price:number;weight_grams:number;stock:number;active:boolean;sale_mode:"stock"|"preorder";preorder_capacity:number};
+type Variant={id:string;product_id:string;name:string;sku:string;local_price:number;weight_grams:number;stock:number;active:boolean;sale_mode:"stock"|"preorder";preorder_capacity:number|null};
 type ProductCategory={id:string;name:string;default_margin_percent:number;active:boolean};
 type Trip = {
   code: string;
@@ -247,7 +247,7 @@ function Dashboard() {
   const [productModal, setProductModal] = useState(false);
   const[variants,setVariants]=useState<Variant[]>([]);
   const[variantProduct,setVariantProduct]=useState<Product|null>(null);
-  const[variantDraft,setVariantDraft]=useState({name:'',sku:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:0});
+  const[variantDraft,setVariantDraft]=useState({name:'',sku:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:null as number|null});
   const [productDraft, setProductDraft] = useState({
     name: "",
     brand: "",
@@ -276,8 +276,8 @@ function Dashboard() {
   });
   const [capacity, setCapacity] = useState(50);
   const [rateDraft, setRateDraft] = useState<{trip: string; value: number} | null>(null);
-  const [rateStatus, setRateStatus] = useState("Simpan kurs trip sebelum menerima pesanan.");
-  const [cargoRate, setCargoRate] = useState(95000);
+  const [rateStatus, setRateStatus] = useState("Menunggu kurs otomatis…");
+  const [cargoRate, setCargoRate] = useState(90000);
   const [productCategory, setProductCategory] = useState("Pakaian");
   const [targetFund, setTargetFund] = useState(12000000);
   const [commerceOrders, setCommerceOrders] = useState<Order[]>([]);
@@ -286,7 +286,7 @@ function Dashboard() {
   const currentOrders = commerceOrders.filter(o => o.trip_code === activeTripCode);
   const collected = currentOrders.reduce((sum, o) => sum + paidAmount(o), 0);
   const grossOrderValue = currentOrders.filter(o => o.status !== "cancelled").reduce((sum,o) => sum + Number(o.total_idr),0);
-  const [otherCargoRate, setOtherCargoRate] = useState(100000);
+  const [otherCargoRate, setOtherCargoRate] = useState(90000);
   const [orderTarget, setOrderTarget] = useState(50);
   const [itemBaht, setItemBaht] = useState(200);
   const [itemGrams, setItemGrams] = useState(350);
@@ -300,7 +300,7 @@ function Dashboard() {
   const done = tasks.filter((t) => t.done).length;
   const dashboardRoute=typeof window!=="undefined"&&window.location.pathname.startsWith("/dashboard");
   const activeTrip = trips.find((t) => t.code === activeTripCode);
-  const rate = rateDraft?.trip === activeTripCode ? rateDraft.value : Number(activeTrip?.exchange_rate_idr) || 0;
+  const rate = rateDraft?.trip === activeTripCode ? rateDraft.value : 0;
   const setRate = (value: number) => setRateDraft({ trip: activeTripCode, value });
   const currency = activeTrip?.currency_code || "MYR";
   const currencySymbol = activeTrip?.currency_symbol || "RM";
@@ -320,16 +320,23 @@ function Dashboard() {
     [],
   );
   const refreshRate = async () => {
-    const rateCurrency = currency;
-    setRateStatus("Mengambil saran kurs…");
-    try {
-      const response = await fetch(`https://open.er-api.com/v6/latest/${rateCurrency}`, { signal: AbortSignal.timeout(6000) });
-      const data = await response.json() as { rates?: Record<string, number> };
-      const value = Number(data.rates?.IDR);
-      if (!response.ok || !Number.isFinite(value) || value <= 0) throw new Error();
-      setRateStatus(`Saran ${rateCurrency}: Rp${value.toLocaleString("id-ID")} · masukkan lalu simpan jika ingin digunakan`);
-    } catch { setRateStatus("Saran kurs tidak tersedia. Isi kurs yang disepakati lalu simpan."); }
+    const { data, error } = await supabase.rpc("commerce_rate_status", { p_currency: currency });
+    setRate(Number(data?.rate) || 0);
+    setRateStatus(error || !data?.rate ? "Kurs belum tersedia atau sudah kedaluwarsa. Pesanan ditahan sampai kurs terbaru tersedia." : `Kurs otomatis · data ${new Date(data.updated_at).toLocaleString("id-ID")}${data.refresh_failed ? " · pembaruan tertunda" : ""}`);
   };
+  useEffect(() => {
+    if (!isMember) return;
+    let active = true;
+    const refresh = async () => {
+      const { data, error } = await supabase.rpc("commerce_rate_status", { p_currency: currency });
+      if (!active) return;
+      setRateDraft({trip: activeTripCode, value: Number(data?.rate) || 0});
+      setRateStatus(error || !data?.rate ? "Kurs belum tersedia atau sudah kedaluwarsa. Pesanan ditahan sampai kurs terbaru tersedia." : `Kurs otomatis · data ${new Date(data.updated_at).toLocaleString("id-ID")}${data.refresh_failed ? " · pembaruan tertunda" : ""}`);
+    };
+    void refresh();
+    const timer = setInterval(() => { void refresh(); }, 60000);
+    return () => { active = false; clearInterval(timer); };
+  }, [isMember, currency, activeTripCode]);
   useEffect(() => {
     if (!user || !isMember) return;
     let active = true;
@@ -567,7 +574,7 @@ function Dashboard() {
     >,
   ) => {
     return calculatePrice({ localPrice: Number(p.local_price ?? p.price_thb), grams: Number(p.weight_grams), category: p.category,
-      margin: p.margin_percent, rate: Number(activeTrip?.exchange_rate_idr) || 0,
+      margin: p.margin_percent, rate,
       fashionCargo: Number(activeTrip?.fashion_cargo_per_kg) || 0, otherCargo: Number(activeTrip?.nonfashion_cargo_per_kg) || 0 });
   };
   const nextProductCode = () =>
@@ -660,7 +667,7 @@ function Dashboard() {
     if (!error) await loadSharedData();
   };
   const uploadPhoto=async(product:Product,file:File)=>{setSyncStatus('Mengunggah foto…');const ext=file.name.split('.').pop()?.toLowerCase()||'jpg';const path=`${product.trip_code}/${product.id}-${Date.now()}.${ext}`;const{error}=await supabase.storage.from('product-images').upload(path,file,{upsert:false});if(error){setSyncStatus('Gagal mengunggah foto');return}const{data}=supabase.storage.from('product-images').getPublicUrl(path);await saveProduct(product.id,'photo_url',data.publicUrl);setCatalogue(rows=>rows.map(x=>x.id===product.id?{...x,photo_url:data.publicUrl}:x));setVariantProduct(x=>x?.id===product.id?{...x,photo_url:data.publicUrl}:x);setSyncStatus('Foto tersimpan')};
-  const togglePublish=async(product:Product)=>{setSyncStatus(product.published?'Menarik produk dari landing page…':'Menyetujui produk…');const next=!product.published;if(next && !(Number(activeTrip?.exchange_rate_idr)>0)){setSyncStatus("Simpan kurs trip sebelum publikasi");return;}const{error}=await supabase.from('products').update({published:next,approved_at:next?new Date().toISOString():null,approved_by:next?user?.id:null,currency_code:currency,currency_symbol:currencySymbol,fashion_cargo_per_kg:cargoRate,nonfashion_cargo_per_kg:otherCargoRate,status:next?'Ready':product.status}).eq('id',product.id);setSyncStatus(error?'Gagal mengubah publikasi':next?'Produk tayang di landing page':'Produk disembunyikan');if(!error){setCatalogue(rows=>rows.map(x=>x.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x));setVariantProduct(x=>x?.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x)}};
+  const togglePublish=async(product:Product)=>{setSyncStatus(product.published?'Menarik produk dari landing page…':'Menyetujui produk…');const next=!product.published;if(next && !(rate>0)){setSyncStatus("Tunggu kurs otomatis sebelum publikasi");return;}const{error}=await supabase.from('products').update({published:next,approved_at:next?new Date().toISOString():null,approved_by:next?user?.id:null,currency_code:currency,currency_symbol:currencySymbol,fashion_cargo_per_kg:cargoRate,nonfashion_cargo_per_kg:otherCargoRate,status:next?'Ready':product.status}).eq('id',product.id);setSyncStatus(error?'Gagal mengubah publikasi':next?'Produk tayang di landing page':'Produk disembunyikan');if(!error){setCatalogue(rows=>rows.map(x=>x.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x));setVariantProduct(x=>x?.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x)}};
   const openVariants=async(product:Product)=>{setVariantProduct(product);const{data}=await supabase.from('product_variants').select('*').eq('product_id',product.id).order('created_at');setVariants((data||[]) as Variant[])};
   const openProductEditor=async(product:Product)=>{
     await openVariants(product);
@@ -674,9 +681,9 @@ function Dashboard() {
     window.history.pushState({},"","/dashboard");
     window.scrollTo({top:0,behavior:"smooth"});
   };
-  const addVariant=async()=>{if(!variantProduct||!user||!variantDraft.name.trim())return;const{error}=await supabase.from('product_variants').insert({...variantDraft,product_id:variantProduct.id,created_by:user.id});if(!error){setVariantDraft({name:'',sku:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:0});await openVariants(variantProduct)}};
-  const saveVariant=async(id:string,key:keyof Variant,value:string|number|boolean)=>{const {error}=await supabase.from('product_variants').update({[key]:value,updated_at:new Date().toISOString()}).eq('id',id);setSyncStatus(error ? "Varian gagal disimpan" : "Varian tersimpan"); if(error && variantProduct) await openVariants(variantProduct);};
-  const updateVariant=(id:string,key:keyof Variant,value:string|number|boolean)=>setVariants(rows=>rows.map(x=>x.id===id?{...x,[key]:value}:x));
+  const addVariant=async()=>{if(!variantProduct||!user||!variantDraft.name.trim())return;const{error}=await supabase.from('product_variants').insert({...variantDraft,product_id:variantProduct.id,created_by:user.id});if(!error){setVariantDraft({name:'',sku:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:null as number|null});await openVariants(variantProduct)}};
+  const saveVariant=async(id:string,key:keyof Variant,value:string|number|boolean|null)=>{const {error}=await supabase.from('product_variants').update({[key]:value,updated_at:new Date().toISOString()}).eq('id',id);setSyncStatus(error ? "Varian gagal disimpan" : "Varian tersimpan"); if(error && variantProduct) await openVariants(variantProduct);};
+  const updateVariant=(id:string,key:keyof Variant,value:string|number|boolean|null)=>setVariants(rows=>rows.map(x=>x.id===id?{...x,[key]:value}:x));
   const deleteVariant=async(id:string)=>{await supabase.from('product_variants').delete().eq('id',id);if(variantProduct)await openVariants(variantProduct)};
   const addCategory=async()=>{
     const name=categoryDraft.trim();
@@ -720,15 +727,15 @@ function Dashboard() {
     window.addEventListener("popstate",handleBack);
     return()=>window.removeEventListener("popstate",handleBack);
   },[catalogue]);
-  const saveSetting = async (key: string, value: number) => {
+  const saveSetting = async (key: "fashion_cargo_per_kg" | "nonfashion_cargo_per_kg" | "target_orders", value: number) => {
     setSyncStatus("Menyimpan pengaturan…");
-    if (!Number.isFinite(value) || value < 0 || (key === "exchange_rate_idr" && value <= 0)) { setSyncStatus("Isi nilai yang valid"); return; }
+    if (!Number.isFinite(value) || value < 0) { setSyncStatus("Isi nilai yang valid"); return; }
     const { error } = await supabase
       .from("trips")
       .update({ [key]: value, updated_at: new Date().toISOString() })
       .eq("code", activeTripCode);
     setSyncStatus(error ? "Gagal menyimpan" : "Pengaturan tersimpan");
-    if (!error) { if (key === "exchange_rate_idr") { setRateDraft(null); setRateStatus("Kurs tersimpan · digunakan katalog dan pesanan"); } await loadSharedData(activeTripCode); }
+    if (!error) await loadSharedData(activeTripCode);
   };
   const selectTrip = (code: string) => {
     setActiveTripCode(code);
@@ -746,7 +753,7 @@ function Dashboard() {
         city: d.city,
         currency_code: d.currency,
         currency_symbol: d.symbol,
-        name: `${d.country} Edit 01`,
+        name: d.country === "Malaysia" ? "Malaysia trip" : `${d.country} trip`,
         updated_at: new Date().toISOString(),
       })
       .eq("code", activeTripCode);
@@ -781,7 +788,8 @@ function Dashboard() {
       .from("trips")
       .insert({
         code,
-        name: tripDraft.name || `${d.country} Edit`,
+        name: tripDraft.name || `${d.country} trip`,
+        fashion_cargo_per_kg: 90000, nonfashion_cargo_per_kg: 90000,
         country: d.country,
         city: tripDraft.city || d.city,
         currency_code: d.currency,
@@ -1476,8 +1484,8 @@ function Dashboard() {
                 </article>
                 <article className="panel editor-section">
                   <div className="editor-section-title"><div><span>VARIAN PRODUK</span><h2>Ukuran, berat & harga</h2></div><small>Setiap varian dihitung terpisah</small></div>
-                  <p className="modal-help">Isi harga dan berat setiap varian. Stok/kuota adalah jumlah total untuk trip ini, termasuk yang sudah dipesan. Kuota awal 0 mencegah pesanan sebelum kamu siap.</p>
-                  {variants.map(v => <div className="variant-availability" key={v.id}><strong>{v.name}</strong><label>Penjualan<select value={v.sale_mode} onChange={e => { updateVariant(v.id,"sale_mode",e.target.value); saveVariant(v.id,"sale_mode",e.target.value); }}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label><label>Kuota total PO<input type="number" min={0} step={1} value={v.preorder_capacity} onChange={e => updateVariant(v.id,"preorder_capacity",Number(e.target.value))} onBlur={e => saveVariant(v.id,"preorder_capacity",Number(e.target.value))}/></label><label><input type="checkbox" checked={v.active} onChange={e => { updateVariant(v.id,"active",e.target.checked); saveVariant(v.id,"active",e.target.checked); }}/> Aktif</label></div>)}
+                  <p className="modal-help">Isi harga dan berat setiap varian. Stok/kuota adalah jumlah total untuk trip ini, termasuk yang sudah dipesan. Preorder tanpa batas tidak memerlukan stok. Isi kuota hanya jika ingin membatasi pesanan.</p>
+                  {variants.map(v => <div className="variant-availability" key={v.id}><strong>{v.name}</strong><label>Penjualan<select value={v.sale_mode} onChange={e => { updateVariant(v.id,"sale_mode",e.target.value); saveVariant(v.id,"sale_mode",e.target.value); }}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label><label>Kuota total PO<input type="number" min={0} step={1} value={v.preorder_capacity ?? ""} placeholder="Tanpa batas" onChange={e => updateVariant(v.id,"preorder_capacity",(e.target.value === "" ? null : Number(e.target.value)))} onBlur={e => saveVariant(v.id,"preorder_capacity",e.target.value === "" ? null : Number(e.target.value))}/></label><label><input type="checkbox" checked={v.active} onChange={e => { updateVariant(v.id,"active",e.target.checked); saveVariant(v.id,"active",e.target.checked); }}/> Aktif</label></div>)}
                   <div className="variant-table-head"><span>Nama varian</span><span>Harga {currency}</span><span>Berat</span><span>Stok</span><span>Harga jual</span><span/></div>
                   <div className="variant-list">{variants.map(v=>{const calc=productPricing({local_price:v.local_price,price_thb:v.local_price,weight_grams:v.weight_grams,category:variantProduct.category,margin_percent:variantProduct.margin_percent});return <div className="variant-row" key={v.id}><input value={v.name} onChange={e=>updateVariant(v.id,'name',e.target.value)} onBlur={e=>saveVariant(v.id,'name',e.target.value)} placeholder="Nama/ukuran"/><input type="number" value={v.local_price||''} onChange={e=>updateVariant(v.id,'local_price',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'local_price',Number(e.target.value))} placeholder={currency}/><input type="number" value={v.weight_grams||''} onChange={e=>updateVariant(v.id,'weight_grams',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'weight_grams',Number(e.target.value))} placeholder="gram"/><input type="number" value={v.stock||''} onChange={e=>updateVariant(v.id,'stock',Number(e.target.value))} onBlur={e=>saveVariant(v.id,'stock',Number(e.target.value))} placeholder="stok"/><strong>{format(calc.sell)}</strong><button className="delete-expense" onClick={()=>deleteVariant(v.id)}><Trash2 size={15}/></button></div>})}</div>
                   <div className="variant-add"><input value={variantDraft.name} onChange={e=>setVariantDraft(x=>({...x,name:e.target.value}))} placeholder="Contoh: Size M"/><input type="number" value={variantDraft.local_price||''} onChange={e=>setVariantDraft(x=>({...x,local_price:Number(e.target.value)}))} placeholder={`Harga ${currency}`}/><input type="number" value={variantDraft.weight_grams||''} onChange={e=>setVariantDraft(x=>({...x,weight_grams:Number(e.target.value)}))} placeholder="Berat gram"/><input type="number" value={variantDraft.stock||''} onChange={e=>setVariantDraft(x=>({...x,stock:Number(e.target.value)}))} placeholder="Stok"/><button onClick={addVariant}><Plus size={14}/> Tambah varian</button></div>
@@ -1891,7 +1899,7 @@ function Dashboard() {
                   </p>
                 </div>
                 <button onClick={refreshRate}>
-                  <RefreshCw size={15} /> Refresh kurs
+                  <RefreshCw size={15} /> Perbarui tampilan kurs
                 </button>
               </div>
               <div className="order-calc">
@@ -1941,8 +1949,8 @@ function Dashboard() {
                         maximumFractionDigits: 2,
                       })}
                     </b>
-                    <input aria-label="Kurs manual ke rupiah" type="number" value={rate||""} onChange={(e)=>{setRate(Number(e.target.value));setRateStatus("Belum disimpan · katalog masih memakai kurs tersimpan")}} />
-                    <button onClick={() => saveSetting("exchange_rate_idr", rate)} disabled={!Number.isFinite(rate) || rate <= 0}>Simpan kurs trip</button>
+                    <p>Kurs diperiksa otomatis setiap jam. Data penyedia diperbarui harian.</p>
+                    <a href="https://www.exchangerate-api.com" target="_blank" rel="noreferrer">Sumber: ExchangeRate-API</a>
                     <small>{rateStatus}</small>
                   </div>
                 </div>

@@ -148,7 +148,7 @@ export default function OrderForm({
                   required
                   type="number"
                   min={1}
-                  max={Math.min(20, variant.available)}
+                  max={Math.min(20, variant.available ?? 20)}
                   value={draft.quantity}
                   onChange={(e) =>
                     setDraft({ ...draft, quantity: Number(e.target.value) })
@@ -212,7 +212,7 @@ export default function OrderForm({
             </div>
             <p className="commerce-help">
               Termasuk kargo internasional. Ongkir domestik dikonfirmasi
-              terpisah. Data kontak digunakan untuk mengurus pesanan ini.
+              terpisah. Data kontak digunakan untuk mengurus pesanan ini. Pesanan yang belum dikonfirmasi dan belum memiliki catatan pembayaran dibatalkan otomatis setelah 48 jam.
             </p>
             {error && (
               <p role="alert" className="commerce-error">

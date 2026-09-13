@@ -229,7 +229,7 @@ export default function Landing() {
                         {variants.map((x) => (
                           <option key={x.id} value={x.id}>
                             {x.name}
-                            {` · ${x.available} ${x.sale_mode === 'stock' ? 'stok' : 'kuota PO'}`}
+                            {x.available === null ? ' · Preorder tersedia' : ` · ${x.available} ${x.sale_mode === 'stock' ? 'stok' : 'kuota PO'}`}
                           </option>
                         ))}
                       </select>
@@ -254,13 +254,13 @@ export default function Landing() {
                         !!loadError ||
                         !v?.unit_price_idr ||
                         Number(v.unit_price_idr) <= 0 ||
-                        v.available < 1
+                        (v.available !== null && v.available < 1)
                       }
                       onClick={() => setOrdering({ product: p, variant: v })}
                     >
                       {!v?.unit_price_idr
                         ? 'Menunggu harga'
-                        : v.available < 1
+                        : (v.available !== null && v.available < 1)
                           ? 'Kuota habis'
                           : v.sale_mode === 'stock'
                             ? 'Pesan sekarang'
@@ -290,7 +290,7 @@ export default function Landing() {
           onSaved={load}
         />
       )}
-      <footer>
+      <footer><a href="https://www.exchangerate-api.com" target="_blank" rel="noreferrer">Kurs oleh ExchangeRate-API</a>
         <div className="store-logo">
           <b>Elsewhere</b>
           <span>& Co.</span>
