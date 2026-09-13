@@ -14,7 +14,7 @@ create policy bootstrap_editor_delete on public.product_variants for delete to a
 create policy bootstrap_editor_insert on public.product_categories for insert to authenticated with check (public.commerce_editor() and created_by = auth.uid());
 create policy bootstrap_editor_update on public.product_categories for update to authenticated using (public.commerce_editor()) with check (public.commerce_editor());
 create policy bootstrap_editor_delete on public.product_categories for delete to authenticated using (public.commerce_editor());
-insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values('product-images','product-images',true,10485760,array['image/jpeg','image/png','image/webp']);
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values('product-images','product-images',true,10485760,array['image/jpeg','image/png','image/webp','image/avif']);
 create policy bootstrap_product_images_read on storage.objects for select to anon,authenticated using(bucket_id='product-images');
 create policy bootstrap_product_images_insert on storage.objects for insert to authenticated with check(bucket_id='product-images' and public.commerce_editor());
 create policy bootstrap_product_images_update on storage.objects for update to authenticated using(bucket_id='product-images' and public.commerce_editor()) with check(bucket_id='product-images' and public.commerce_editor());
