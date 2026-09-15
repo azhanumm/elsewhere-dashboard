@@ -229,6 +229,30 @@ function Dashboard() {
   const [view, setView] = useState<"dashboard" | "trip" | "catalogue" | "product" | "orders">(
     "dashboard",
   );
+  const scrollPositions = useRef<Record<string, number>>({
+    dashboard: 0,
+    trip: 0,
+    catalogue: 0,
+    orders: 0,
+  });
+  const switchView = (
+    next: "dashboard" | "trip" | "catalogue" | "orders",
+  ) => {
+    if (view !== "product") {
+      scrollPositions.current[view] = window.scrollY;
+    }
+
+    setView(next);
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo({
+          top: scrollPositions.current[next] ?? 0,
+          behavior: "auto",
+        });
+      });
+    });
+  };
   const [trips, setTrips] = useState<Trip[]>([]);
   const [activeTripCode, setActiveTripCode] = useState("TRIP-001");
   const [tripModal, setTripModal] = useState(false);
@@ -686,16 +710,25 @@ function Dashboard() {
   const togglePublish=async(product:Product)=>{setSyncStatus(product.published?'Menarik produk dari landing page…':'Menyetujui produk…');const next=!product.published;if(next && !(rate>0)){setSyncStatus("Tunggu kurs otomatis sebelum publikasi");return;}const{error}=await supabase.from('products').update({published:next,approved_at:next?new Date().toISOString():null,approved_by:next?user?.id:null,currency_code:currency,currency_symbol:currencySymbol,fashion_cargo_per_kg:cargoRate,nonfashion_cargo_per_kg:otherCargoRate,status:next?'Ready':product.status}).eq('id',product.id);setSyncStatus(error?'Gagal mengubah publikasi':next?'Produk tayang di landing page':'Produk disembunyikan');if(!error){setCatalogue(rows=>rows.map(x=>x.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x));setVariantProduct(x=>x?.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x)}};
   const openVariants=async(product:Product)=>{setVariantProduct(product);const{data}=await supabase.from('product_variants').select('*').eq('product_id',product.id).order('created_at');setVariants((data||[]) as Variant[])};
   const openProductEditor=async(product:Product)=>{
+    scrollPositions.current.catalogue = window.scrollY;
     catalogueReturn.current = { id: product.id, y: window.scrollY };
     await openVariants(product);
     setView("product");
     window.history.pushState({},"",`/dashboard/products/${product.id}`);
-    window.scrollTo({top:0,behavior:"smooth"});
+    window.scrollTo({top:0,behavior:"auto"});
   };
   const closeProductEditor=()=>{
     setVariantProduct(null);
     setView("catalogue");
     window.history.pushState({},"","/dashboard");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo({
+          top: scrollPositions.current.catalogue ?? 0,
+          behavior: "auto",
+        });
+      });
+    });
     restoreCataloguePosition();
   };
   const addVariant=async()=>{if(!variantProduct||!user||!variantDraft.name.trim())return;const{error}=await supabase.from('product_variants').insert({...variantDraft,product_id:variantProduct.id,created_by:user.id});if(!error){setVariantDraft({name:'',sku:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:null as number|null});await openVariants(variantProduct)}};
@@ -757,7 +790,7 @@ function Dashboard() {
   };
   const selectTrip = (code: string) => {
     setActiveTripCode(code);
-    setView("trip");
+    switchView("trip");
     setNav(false);
   };
   const changeCountry = async (country: string) => {
@@ -822,7 +855,7 @@ function Dashboard() {
     }
     setTripModal(false);
     setActiveTripCode(code);
-    setView("trip");
+    switchView("trip");
   };
   useEffect(() => {
     setTargetFund(plannedCapital);
@@ -948,9 +981,9 @@ function Dashboard() {
           <a
             className={view === "dashboard" ? "active" : ""}
             onClick={() => {
-              setView("dashboard");
+              switchView("dashboard");
               setVariantProduct(null);
-              window.history.pushState({},"","/dashboard");
+              window.history.pushState({}, "", "/dashboard");
               setNav(false);
             }}
           >
@@ -961,15 +994,15 @@ function Dashboard() {
             <Users />
             Leads & waitlist <em>48</em>
           </a>
-          <a href="/dashboard" className={view === "orders" ? "active" : ""} onClick={e => { e.preventDefault(); setView("orders"); setVariantProduct(null); setNav(false); window.history.pushState({}, "", "/dashboard"); }}>
+          <a href="/dashboard" className={view === "orders" ? "active" : ""} onClick={e => { e.preventDefault(); switchView("orders"); setVariantProduct(null); setNav(false); window.history.pushState({}, "", "/dashboard"); }}>
             <ShoppingBag /> Orders <em>{currentOrders.length}</em>
           </a>
           <a
             className={view === "catalogue" || view === "product" ? "active" : ""}
             onClick={() => {
-              setView("catalogue");
+              switchView("catalogue");
               setVariantProduct(null);
-              window.history.pushState({},"","/dashboard");
+              window.history.pushState({}, "", "/dashboard");
               setNav(false);
             }}
           >
@@ -980,9 +1013,9 @@ function Dashboard() {
           <a
             className={view === "trip" ? "active" : ""}
             onClick={() => {
-              setView("trip");
+              switchView("trip");
               setVariantProduct(null);
-              window.history.pushState({},"","/dashboard");
+              window.history.pushState({}, "", "/dashboard");
               setNav(false);
             }}
           >
@@ -1022,7 +1055,7 @@ function Dashboard() {
           </div>
           <button
             onClick={() => {
-              setView("trip");
+              switchView("trip");
               setNav(false);
             }}
           >
@@ -1067,7 +1100,7 @@ function Dashboard() {
             </button>
           </div>
         </header>
-        <div className="commerce-trip-bar"><label>Trip aktif <select value={activeTripCode} onChange={e => { setActiveTripCode(e.target.value); setVariantProduct(null); if(view === "product") setView("catalogue"); }}>{trips.map(t => <option key={t.code} value={t.code}>{t.name} · {t.code}</option>)}</select></label><a href="/" target="_blank" rel="noreferrer">Lihat katalog ↗</a><output>{syncStatus}</output></div>
+        <div className="commerce-trip-bar"><label>Trip aktif <select value={activeTripCode} onChange={e => { setActiveTripCode(e.target.value); setVariantProduct(null); if(view === "product") switchView("catalogue"); }}>{trips.map(t => <option key={t.code} value={t.code}>{t.name} · {t.code}</option>)}</select></label><a href="/" target="_blank" rel="noreferrer">Lihat katalog ↗</a><output>{syncStatus}</output></div>
         {commerceError && <p role="alert" className="commerce-error">{commerceError}</p>}
         {view === "orders" ? <OrdersPanel key={activeTripCode} tripCode={activeTripCode} onChange={() => setCommerceRevision(n => n + 1)}/> : view === "trip" ? (
           <section className="trip-workspace">
@@ -1158,9 +1191,24 @@ function Dashboard() {
                   />
                 </label>
                 <div className="trip-sync">
-                  <div className="trip-status">
-                    <i /> {activeTrip?.status || "Planning"}
-                  </div>
+                  <label className="trip-status-control">
+                    Status trip
+                    <select
+                      value={activeTrip?.status || "Planning"}
+                      onChange={(e) =>
+                        saveTripField(
+                          "status",
+                          e.target.value as Trip["status"],
+                        )
+                      }
+                    >
+                      <option value="Planning">Planning</option>
+                      <option value="Open PO">Open PO</option>
+                      <option value="On trip">On trip</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Archived">Archived</option>
+                    </select>
+                  </label>
                   <small>{syncStatus}</small>
                 </div>
               </div>
