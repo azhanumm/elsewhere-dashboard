@@ -5,6 +5,7 @@ import { normalizePhone } from '../lib/commerce';
 import { rupiah } from '../lib/pricing';
 import ProductPhoto from './product-photo';
 import { supabase } from '../lib/supabase';
+import { findMatchingVariant, getCompatibleOptionValues, getOptionValues } from '../lib/variant-selection.js';
 
 export type CartItem = {
   product: CatalogueProduct;
@@ -22,32 +23,56 @@ export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
   const [selectedId, setSelectedId] = useState('');
   const dialogRef = useRef<HTMLDialogElement>(null);
   const variants = product?.product_variants || [];
-  const selected = variants.find((variant) => variant.id === selectedId) || variants[0];
+  const selected = selectedId ? variants.find((variant) => variant.id === selectedId) : undefined;
   const [quantity, setQuantity] = useState(1);
 
   useEffect(() => {
     if (!product) return;
-    setSelectedId(product.product_variants?.[0]?.id || '');
+    setSelectedId('');
     setQuantity(1);
     dialogRef.current?.showModal();
     return () => dialogRef.current?.close();
   }, [product]);
 
+  useEffect(() => {
+    if (!product || variants.length <= 1) return;
+    if (selectedId && !variants.some((variant) => variant.id === selectedId)) {
+      setSelectedId('');
+    }
+  }, [product, selectedId, variants]);
+
   if (!product) return null;
-  const option1Values = [...new Set(variants.map((variant) => variant.option1_value).filter(Boolean))] as string[];
-  const option2Values = [...new Set(variants.map((variant) => variant.option2_value).filter(Boolean))] as string[];
-  const selectedOption1 = selected?.option1_value;
-  const selectedOption2 = selected?.option2_value;
+  const option1Values = getOptionValues(variants, 'option1_value') as string[];
+  const option2Values = getOptionValues(variants, 'option2_value') as string[];
+  const selectedOption1 = selected?.option1_value ?? '';
+  const selectedOption2 = selected?.option2_value ?? '';
+  const compatibleOption2Values = selectedOption1 ? getCompatibleOptionValues(variants, 'option1_value', selectedOption1, 'option2_value') : option2Values;
+  const compatibleOption1Values = selectedOption2 ? getCompatibleOptionValues(variants, 'option2_value', selectedOption2, 'option1_value') : option1Values;
   const chooseOption = (key: 'option1_value' | 'option2_value', value: string) => {
-    const match = variants.find((variant) => {
-      const nextOption1 = key === 'option1_value' ? value : selectedOption1;
-      const nextOption2 = key === 'option2_value' ? value : selectedOption2;
-      return variant.option1_value === nextOption1 && variant.option2_value === nextOption2;
-    }) || variants.find((variant) => variant[key] === value);
-    if (match) setSelectedId(match.id);
+    if (key === 'option1_value') {
+      const nextOption1 = value;
+      const nextOption2 = selectedOption2 && getCompatibleOptionValues(variants, 'option1_value', nextOption1, 'option2_value').includes(selectedOption2)
+        ? selectedOption2
+        : getCompatibleOptionValues(variants, 'option1_value', nextOption1, 'option2_value')[0] ?? '';
+      const match = nextOption2 ? findMatchingVariant(variants, nextOption1, nextOption2) : null;
+      setSelectedId(match ? match.id : '');
+      return;
+    }
+
+    const match = selectedOption1 ? findMatchingVariant(variants, selectedOption1, value) : variants.find((variant) => variant.option2_value === value);
+    setSelectedId(match ? match.id : '');
   };
+  const isOption1Disabled = (value: string) => !!selectedOption2 && !compatibleOption1Values.includes(value);
+  const isOption2Disabled = (value: string) => !!selectedOption1 && !compatibleOption2Values.includes(value);
+
+  useEffect(() => {
+    if (!selected && variants.length === 1) {
+      setSelectedId(variants[0].id);
+    }
+  }, [selected, variants]);
+
   const maxQuantity = Math.min(20, selected?.available ?? 20);
-  const unavailable = !selected?.unit_price_idr || (selected.available !== null && selected.available < 1);
+  const unavailable = !selected || !selected.unit_price_idr || (selected.available !== null && selected.available < 1);
 
   return (
     <dialog ref={dialogRef} className="storefront-dialog" onCancel={(event) => { event.preventDefault(); onClose(); }}>
@@ -61,12 +86,12 @@ export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
           <h2>{product.name}</h2>
           <p className="product-detail-price">{selected?.unit_price_idr ? rupiah(Number(selected.unit_price_idr)) : 'Harga belum tersedia'}</p>
           <p className="product-detail-note">Termasuk kargo internasional. Ongkir domestik dikonfirmasi terpisah.</p>
-          {option1Values.length > 0 && <fieldset className="variant-choices"><legend>{product.option1_label || 'Pilihan'}</legend><div>{option1Values.map((value) => <button type="button" className={selectedOption1 === value ? 'selected' : ''} key={value} onClick={() => chooseOption('option1_value', value)}>{value}</button>)}</div></fieldset>}
-          {option2Values.length > 0 && <fieldset className="variant-choices"><legend>{product.option2_label || 'Ukuran'}</legend><div>{option2Values.map((value) => <button type="button" className={selectedOption2 === value ? 'selected' : ''} key={value} onClick={() => chooseOption('option2_value', value)}>{value}</button>)}</div></fieldset>}
+          {option1Values.length > 0 && <fieldset className="variant-choices"><legend>{product.option1_label || 'Pilihan'}</legend><div>{option1Values.map((value) => <button type="button" className={selectedOption1 === value ? 'selected' : ''} key={value} disabled={isOption1Disabled(value)} onClick={() => chooseOption('option1_value', value)}>{value}</button>)}</div></fieldset>}
+          {option2Values.length > 0 && <fieldset className="variant-choices"><legend>{product.option2_label || 'Ukuran'}</legend><div>{option2Values.map((value) => <button type="button" className={selectedOption2 === value ? 'selected' : ''} key={value} disabled={isOption2Disabled(value)} onClick={() => chooseOption('option2_value', value)}>{value}</button>)}</div></fieldset>}
           {!option1Values.length && !option2Values.length && variants.length > 1 && <label className="variant-select-label">Pilihan<select value={selected?.id || ''} onChange={(event) => setSelectedId(event.target.value)}>{variants.map((variant) => <option value={variant.id} key={variant.id}>{variant.name}</option>)}</select></label>}
           <div className="product-detail-availability">{selected?.sale_mode === 'stock' ? 'Ready stock' : 'Pre order'}{selected?.available !== null ? ` · ${selected?.available || 0} tersedia` : ' · Kuota terbuka'}</div>
           <div className="quantity-control"><span>Jumlah</span><div><button type="button" aria-label="Kurangi jumlah" onClick={() => setQuantity((value) => Math.max(1, value - 1))}><Minus size={15} /></button><strong>{quantity}</strong><button type="button" aria-label="Tambah jumlah" onClick={() => setQuantity((value) => Math.min(maxQuantity, value + 1))}><Plus size={15} /></button></div></div>
-          <button className="commerce-primary storefront-add-button" type="button" disabled={unavailable} onClick={() => { onAdd({ product, variant: selected, quantity }); onClose(); }}>{unavailable ? 'Tidak tersedia' : 'Tambah ke keranjang'}</button>
+          <button className="commerce-primary storefront-add-button" type="button" disabled={unavailable} onClick={() => { if (!selected) return; onAdd({ product, variant: selected, quantity }); onClose(); }}>{unavailable ? 'Tidak tersedia' : 'Tambah ke keranjang'}</button>
         </div>
       </div>
     </dialog>

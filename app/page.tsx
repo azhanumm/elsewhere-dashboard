@@ -237,6 +237,15 @@ export function Dashboard() {
     catalogue: 0,
     orders: 0,
   });
+  const saveDashboardState = () => {
+    if (typeof window === "undefined") return;
+    sessionStorage.setItem("elsewhere-dashboard-state", JSON.stringify({
+      view,
+      activeTripCode,
+      scrollY: window.scrollY,
+      scrollPositions: scrollPositions.current,
+    }));
+  };
   const switchView = (
     next: "dashboard" | "trip" | "catalogue" | "orders",
   ) => {
@@ -245,6 +254,12 @@ export function Dashboard() {
     }
 
     setView(next);
+    sessionStorage.setItem("elsewhere-dashboard-state", JSON.stringify({
+      view: next,
+      activeTripCode,
+      scrollY: scrollPositions.current[next] ?? 0,
+      scrollPositions: scrollPositions.current,
+    }));
 
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -280,6 +295,9 @@ export function Dashboard() {
   const [productModal, setProductModal] = useState(false);
   const[variants,setVariants]=useState<Variant[]>([]);
   const[variantProduct,setVariantProduct]=useState<Product|null>(null);
+  const[option1ValuesText,setOption1ValuesText]=useState("");
+  const[option2ValuesText,setOption2ValuesText]=useState("");
+  const[option1Assignments,setOption1Assignments]=useState<Record<string,{selected:string[];price:number;weight_grams:number;photo_url:string;sale_mode:"stock"|"preorder";preorder_capacity:number|null}>>({});
   const[variantDraft,setVariantDraft]=useState({name:'',sku:'',option1_value:'',option2_value:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:null as number|null});
   const [productDraft, setProductDraft] = useState({
     name: "",
@@ -392,6 +410,23 @@ export function Dashboard() {
     return () => { active = false; clearInterval(timer); };
   }, [user, isMember, activeTripCode, commerceRevision]);
   useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("elsewhere-dashboard-state");
+      if (saved) {
+        const parsed = JSON.parse(saved) as { view?: string; activeTripCode?: string; scrollY?: number; scrollPositions?: Record<string, number> };
+        if (parsed.view && ["dashboard", "trip", "catalogue", "orders"].includes(parsed.view)) setView(parsed.view as typeof view);
+        if (parsed.activeTripCode) setActiveTripCode(parsed.activeTripCode);
+        if (parsed.scrollPositions) Object.assign(scrollPositions.current, parsed.scrollPositions);
+        if (typeof parsed.scrollY === "number") {
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: parsed.scrollY ?? 0, behavior: "auto" });
+          });
+        }
+      }
+    } catch {
+      // Ignore stale session state.
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user || null);
       setAuthLoading(false);
@@ -405,6 +440,10 @@ export function Dashboard() {
     });
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    saveDashboardState();
+  }, [view, activeTripCode]);
   const loadSharedData = async (code = activeTripCode) => {
     setSyncStatus("Menyinkronkan…");
     const [tripResult, expenseResult, productResult, categoryResult] = await Promise.all([
@@ -734,6 +773,85 @@ export function Dashboard() {
     restoreCataloguePosition();
   };
   const variantDisplayName=(variant:Pick<Variant,'name'|'option1_value'|'option2_value'>) => [variant.option1_value,variant.option2_value].filter(Boolean).join(' / ') || variant.name;
+  const parseOptionList=(text:string)=>Array.from(new Set(text.split(/\n|,/).map((value)=>value.trim()).filter(Boolean)));
+  const getOption1Default=(option1:string)=>{
+    const base = variants.find((row) => row.option1_value === option1) || variants[0];
+    return {
+      selected: variants.filter((row) => row.option1_value === option1 && row.option2_value).map((row) => row.option2_value as string),
+      price: Number(base?.local_price ?? variantProduct?.local_price ?? 0),
+      weight_grams: Number(base?.weight_grams ?? variantProduct?.weight_grams ?? 0),
+      photo_url: base?.photo_url ?? variantProduct?.photo_url ?? '',
+      sale_mode: (base?.sale_mode ?? 'preorder') as 'stock' | 'preorder',
+      preorder_capacity: base?.preorder_capacity ?? null,
+    };
+  };
+  const syncVariantMatrix=async()=>{
+    if (!variantProduct || !user) return;
+    const option1Values = parseOptionList(option1ValuesText);
+    const option2Values = parseOptionList(option2ValuesText);
+    const desired = new Map<string,{ option1_value:string; option2_value:string }>();
+    for (const option1 of option1Values) {
+      const selected = option1Assignments[option1]?.selected ?? option2Values;
+      for (const option2 of selected) {
+        if (!option2Values.includes(option2)) continue;
+        desired.set(`${option1}::${option2}`, { option1_value: option1, option2_value: option2 });
+      }
+    }
+    const currentByKey = new Map(variants.map((row) => [`${row.option1_value || ''}::${row.option2_value || ''}`, row]));
+    for (const [key, row] of currentByKey.entries()) {
+      if (!desired.has(key)) {
+        const { error } = await supabase.from('product_variants').delete().eq('id', row.id);
+        if (error) { setSyncStatus('Gagal menghapus varian tidak aktif'); return; }
+      }
+    }
+    for (const [key, combo] of desired.entries()) {
+      const existing = currentByKey.get(key);
+      const assignment = option1Assignments[combo.option1_value] ?? getOption1Default(combo.option1_value);
+      const commonPrice = Number(assignment.price ?? variantProduct.local_price ?? 0);
+      const commonWeight = Number(assignment.weight_grams ?? variantProduct.weight_grams ?? 0);
+      const commonPhoto = assignment.photo_url || variantProduct.photo_url || '';
+      const commonSaleMode = assignment.sale_mode ?? 'preorder';
+      const commonCapacity = assignment.preorder_capacity ?? null;
+      if (existing) {
+        const nextName = [combo.option1_value, combo.option2_value].filter(Boolean).join(' / ');
+        const payload = {
+          option1_value: combo.option1_value,
+          option2_value: combo.option2_value,
+          name: nextName,
+          local_price: commonPrice,
+          weight_grams: commonWeight,
+          photo_url: commonPhoto,
+          sale_mode: commonSaleMode,
+          preorder_capacity: commonCapacity,
+          active: true,
+          updated_at: new Date().toISOString(),
+        };
+        const changed = existing.option1_value !== combo.option1_value || existing.option2_value !== combo.option2_value || existing.name !== nextName || existing.local_price !== commonPrice || existing.weight_grams !== commonWeight || (existing.photo_url || '') !== commonPhoto || existing.sale_mode !== commonSaleMode || (existing.preorder_capacity ?? null) !== commonCapacity;
+        if (!changed) continue;
+        const { error } = await supabase.from('product_variants').update(payload).eq('id', existing.id);
+        if (error) { setSyncStatus('Gagal memperbarui varian otomatis'); return; }
+        continue;
+      }
+      const { error } = await supabase.from('product_variants').insert({
+        product_id: variantProduct.id,
+        name: [combo.option1_value, combo.option2_value].filter(Boolean).join(' / ') || variantProduct.name,
+        sku: `${variantProduct.product_code}-${combo.option1_value}-${combo.option2_value}`.replace(/\s+/g, '').slice(0, 40),
+        option1_value: combo.option1_value,
+        option2_value: combo.option2_value,
+        local_price: commonPrice,
+        weight_grams: commonWeight,
+        photo_url: commonPhoto,
+        stock: 0,
+        active: true,
+        sale_mode: commonSaleMode,
+        preorder_capacity: commonCapacity,
+        created_by: user.id,
+      });
+      if (error) { setSyncStatus('Gagal membuat varian otomatis'); return; }
+    }
+    setSyncStatus('Daftar varian otomatis tersimpan');
+    await openVariants(variantProduct);
+  };
   const addVariant=async()=>{if(!variantProduct||!user||!variantDraft.name.trim())return;const{error}=await supabase.from('product_variants').insert({...variantDraft,name:variantDisplayName(variantDraft),product_id:variantProduct.id,created_by:user.id});if(!error){setVariantDraft({name:'',sku:'',option1_value:'',option2_value:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:null as number|null});await openVariants(variantProduct)}};
   const saveVariant=async(id:string,key:keyof Variant,value:string|number|boolean|null)=>{const {error}=await supabase.from('product_variants').update({[key]:value,updated_at:new Date().toISOString()}).eq('id',id);setSyncStatus(error ? "Varian gagal disimpan" : "Varian tersimpan"); if(error && variantProduct) await openVariants(variantProduct);};
   const updateVariant=(id:string,key:keyof Variant,value:string|number|boolean|null)=>setVariants(rows=>rows.map(x=>x.id===id?{...x,[key]:value,...((key==='option1_value'||key==='option2_value')?{name:variantDisplayName({...x,[key]:value})}: {})}:x));
@@ -769,7 +887,26 @@ export function Dashboard() {
     if(!product||variantProduct?.id===product.id)return;
     setVariantProduct(product);
     setView("product");
-    supabase.from("product_variants").select("*").eq("product_id",product.id).order("created_at").then(({data})=>setVariants((data||[]) as Variant[]));
+    supabase.from("product_variants").select("*").eq("product_id",product.id).order("created_at").then(({data})=>{
+      const rows=(data||[]) as Variant[];
+      setVariants(rows);
+      const option1List = Array.from(new Set(rows.map((row) => row.option1_value).filter(Boolean))) as string[];
+      const option2List = Array.from(new Set(rows.map((row) => row.option2_value).filter(Boolean))) as string[];
+      setOption1ValuesText(option1List.join('\n'));
+      setOption2ValuesText(option2List.join('\n'));
+      const nextAssignments: Record<string,{selected:string[];price:number;weight_grams:number;photo_url:string;sale_mode:"stock"|"preorder";preorder_capacity:number|null}> = {};
+      for (const option1 of option1List) {
+        nextAssignments[option1] = {
+          selected: rows.filter((row) => row.option1_value === option1 && row.option2_value).map((row) => row.option2_value as string),
+          price: Number(rows.find((row) => row.option1_value === option1)?.local_price ?? product.local_price ?? 0),
+          weight_grams: Number(rows.find((row) => row.option1_value === option1)?.weight_grams ?? product.weight_grams ?? 0),
+          photo_url: rows.find((row) => row.option1_value === option1)?.photo_url ?? product.photo_url ?? '',
+          sale_mode: (rows.find((row) => row.option1_value === option1)?.sale_mode ?? 'preorder') as 'stock' | 'preorder',
+          preorder_capacity: rows.find((row) => row.option1_value === option1)?.preorder_capacity ?? null,
+        };
+      }
+      setOption1Assignments(nextAssignments);
+    });
   },[catalogue,variantProduct?.id]);
   useEffect(()=>{
     const handleBack=()=>{
@@ -1560,22 +1697,51 @@ export function Dashboard() {
                     <label>Pilihan 1 (contoh: Model)<input value={variantProduct.option1_label || ""} placeholder="Model" onChange={e=>updateEditorProduct(variantProduct.id,"option1_label",e.target.value)} onBlur={e=>saveProduct(variantProduct.id,"option1_label",e.target.value.trim() || null)}/></label>
                     <label>Pilihan 2 (contoh: Ukuran)<input value={variantProduct.option2_label || ""} placeholder="Ukuran" onChange={e=>updateEditorProduct(variantProduct.id,"option2_label",e.target.value)} onBlur={e=>saveProduct(variantProduct.id,"option2_label",e.target.value.trim() || null)}/></label>
                   </div>
-                  <div className="variant-editor-list">
-                    {variants.map(v => <div className="variant-editor-row" key={v.id}>
-                      <div className="variant-photo-preview"><ProductPhoto key={`${v.id}-${v.photo_url}`} variant={v} product={variantProduct} alt={`${variantProduct.name} — ${variantDisplayName(v)}`}/></div>
-                      <div className="variant-editor-fields">
-                        <label>{variantProduct.option1_label || "Pilihan 1"}<input value={v.option1_value || ""} placeholder="Contoh: Sweater" onChange={e=>updateVariant(v.id,"option1_value",e.target.value)} onBlur={e=>saveVariantOption(v,"option1_value",e.target.value.trim())}/></label>
-                        <label>{variantProduct.option2_label || "Pilihan 2"}<input value={v.option2_value || ""} placeholder="Contoh: Garret" onChange={e=>updateVariant(v.id,"option2_value",e.target.value)} onBlur={e=>saveVariantOption(v,"option2_value",e.target.value.trim())}/></label>
-                        <label>SKU<input value={v.sku || ""} onChange={e=>updateVariant(v.id,"sku",e.target.value)} onBlur={e=>saveVariant(v.id,"sku",e.target.value.trim())}/></label>
-                        <label>Foto varian<input type="url" aria-label={`Link foto ${variantDisplayName(v)}`} value={v.photo_url || ''} placeholder="https://… (opsional)" onChange={e=>updateVariant(v.id,'photo_url',e.target.value)} onBlur={e=>{const url=e.target.value.trim();if(url&&!/^https?:\/\//i.test(url)){setSyncStatus('Gunakan link foto http atau https');return;}saveVariant(v.id,'photo_url',url)}}/><input type="file" accept="image/jpeg,image/png,image/webp" aria-label={`Upload foto ${variantDisplayName(v)}`} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadVariantPhoto(v,file)}}/><small>Upload file atau tempel link. Kosong memakai foto produk.</small></label>
-                        <label>Harga {currency}<input type="number" value={v.local_price || ""} onChange={e=>updateVariant(v.id,"local_price",Number(e.target.value))} onBlur={e=>saveVariant(v.id,"local_price",Number(e.target.value))}/></label>
-                        <label>Berat (gram)<input type="number" value={v.weight_grams || ""} onChange={e=>updateVariant(v.id,"weight_grams",Number(e.target.value))} onBlur={e=>saveVariant(v.id,"weight_grams",Number(e.target.value))}/></label>
-                        <label>Penjualan<select value={v.sale_mode} onChange={e=>{updateVariant(v.id,"sale_mode",e.target.value);saveVariant(v.id,"sale_mode",e.target.value)}}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label>
-                        <label>Kuota total PO<input type="number" min={0} step={1} value={v.preorder_capacity ?? ""} placeholder="Tanpa batas" onChange={e=>updateVariant(v.id,"preorder_capacity",e.target.value === "" ? null : Number(e.target.value))} onBlur={e=>saveVariant(v.id,"preorder_capacity",e.target.value === "" ? null : Number(e.target.value))}/></label>
-                        <label className="variant-active"><input type="checkbox" checked={v.active} onChange={e=>{updateVariant(v.id,"active",e.target.checked);saveVariant(v.id,"active",e.target.checked)}}/> Aktif</label>
-                        <button className="delete-expense" onClick={()=>deleteVariant(v.id)} aria-label={`Hapus varian ${variantDisplayName(v)}`}><Trash2 size={15}/></button>
-                      </div>
-                    </div>)}
+                  <div className="variant-option-settings">
+                    <label>{variantProduct.option1_label || "Pilihan 1"} tersedia<input value={option1ValuesText} onChange={e=>setOption1ValuesText(e.target.value)} placeholder="Violeta\nSerenata" /></label>
+                    <label>{variantProduct.option2_label || "Pilihan 2"} tersedia<input value={option2ValuesText} onChange={e=>setOption2ValuesText(e.target.value)} placeholder="XXS\nXS\nS\nXL" /></label>
+                  </div>
+                  <div className="variant-matrix-editor">
+                    {parseOptionList(option1ValuesText).map((option1) => {
+                      const assignment = option1Assignments[option1] ?? { selected: parseOptionList(option2ValuesText), price: Number(variantProduct.local_price || 0), weight_grams: Number(variantProduct.weight_grams || 0), photo_url: variantProduct.photo_url || '', sale_mode: 'preorder' as const, preorder_capacity: null };
+                      const option1Variants = variants.filter((row) => row.option1_value === option1);
+                      return <div className="variant-matrix-card" key={option1}>
+                        <div className="variant-matrix-header">
+                          <strong>{option1}</strong>
+                        </div>
+                        <div className="variant-matrix-checklist">{parseOptionList(option2ValuesText).map((option2) => <label key={`${option1}-${option2}`}><input type="checkbox" checked={assignment.selected.includes(option2)} onChange={(event) => {
+                              const nextSelected = event.target.checked ? [...new Set([...assignment.selected, option2])] : assignment.selected.filter((value) => value !== option2);
+                              setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, selected: nextSelected } }));
+                            }} />{option2}</label>)}</div>
+                        <div className="variant-matrix-fields">
+                          <label>Harga {currency}<input type="number" value={assignment.price || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, price: Number(event.target.value || 0) } }))} /></label>
+                          <label>Berat (gram)<input type="number" value={assignment.weight_grams || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, weight_grams: Number(event.target.value || 0) } }))} /></label>
+                          <label>Foto varian<input type="url" value={assignment.photo_url || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, photo_url: event.target.value } }))} placeholder="https://…" /></label>
+                          <label>Penjualan<select value={assignment.sale_mode} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, sale_mode: event.target.value as 'stock' | 'preorder' } }))}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label>
+                        </div>
+                        {option1Variants.length > 0 ? (
+                          <div className="variant-matrix-rows">
+                            {option1Variants.map((v) => (
+                              <div className="variant-matrix-row" key={v.id}>
+                                <div className="variant-photo-preview"><ProductPhoto key={`${v.id}-${v.photo_url}`} variant={v} product={variantProduct} alt={`${variantProduct.name} — ${variantDisplayName(v)}`}/></div>
+                                <div className="variant-editor-fields">
+                                  <label>{variantProduct.option1_label || "Pilihan 1"}<input value={v.option1_value || ""} placeholder="Contoh: Sweater" onChange={e=>updateVariant(v.id,"option1_value",e.target.value)} onBlur={e=>saveVariantOption(v,"option1_value",e.target.value.trim())}/></label>
+                                  <label>{variantProduct.option2_label || "Pilihan 2"}<input value={v.option2_value || ""} placeholder="Contoh: Garret" onChange={e=>updateVariant(v.id,"option2_value",e.target.value)} onBlur={e=>saveVariantOption(v,"option2_value",e.target.value.trim())}/></label>
+                                  <label>SKU<input value={v.sku || ""} onChange={e=>updateVariant(v.id,"sku",e.target.value)} onBlur={e=>saveVariant(v.id,"sku",e.target.value.trim())}/></label>
+                                  <label>Foto varian<input type="url" aria-label={`Link foto ${variantDisplayName(v)}`} value={v.photo_url || ''} placeholder="https://… (opsional)" onChange={e=>updateVariant(v.id,'photo_url',e.target.value)} onBlur={e=>{const url=e.target.value.trim();if(url&&!/^https?:\/\//i.test(url)){setSyncStatus('Gunakan link foto http atau https');return;}saveVariant(v.id,'photo_url',url)}}/><input type="file" accept="image/jpeg,image/png,image/webp" aria-label={`Upload foto ${variantDisplayName(v)}`} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadVariantPhoto(v,file)}}/><small>Upload file atau tempel link. Kosong memakai foto produk.</small></label>
+                                  <label>Harga {currency}<input type="number" value={v.local_price || ""} onChange={e=>updateVariant(v.id,"local_price",Number(e.target.value))} onBlur={e=>saveVariant(v.id,"local_price",Number(e.target.value))}/></label>
+                                  <label>Berat (gram)<input type="number" value={v.weight_grams || ""} onChange={e=>updateVariant(v.id,"weight_grams",Number(e.target.value))} onBlur={e=>saveVariant(v.id,"weight_grams",Number(e.target.value))}/></label>
+                                  <label>Penjualan<select value={v.sale_mode} onChange={e=>{updateVariant(v.id,"sale_mode",e.target.value);saveVariant(v.id,"sale_mode",e.target.value)}}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label>
+                                  <label>Kuota total PO<input type="number" min={0} step={1} value={v.preorder_capacity ?? ""} placeholder="Tanpa batas" onChange={e=>updateVariant(v.id,"preorder_capacity",e.target.value === "" ? null : Number(e.target.value))} onBlur={e=>saveVariant(v.id,"preorder_capacity",e.target.value === "" ? null : Number(e.target.value))}/></label>
+                                  <label className="variant-active"><input type="checkbox" checked={v.active} onChange={e=>{updateVariant(v.id,"active",e.target.checked);saveVariant(v.id,"active",e.target.checked)}}/> Aktif</label>
+                                  <button className="delete-expense" onClick={()=>deleteVariant(v.id)} aria-label={`Hapus varian ${variantDisplayName(v)}`}><Trash2 size={15}/></button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : <div className="variant-empty-state">Belum ada kombinasi untuk {option1}</div>}
+                      </div>;
+                    })}
                   </div>
                   <div className="variant-add"><input value={variantDraft.option1_value} onChange={e=>setVariantDraft(x=>({...x,option1_value:e.target.value,name:e.target.value}))} placeholder={variantProduct.option1_label || "Pilihan 1"}/><input value={variantDraft.option2_value} onChange={e=>setVariantDraft(x=>({...x,option2_value:e.target.value,name:e.target.value}))} placeholder={variantProduct.option2_label || "Pilihan 2"}/><input value={variantDraft.sku} onChange={e=>setVariantDraft(x=>({...x,sku:e.target.value}))} placeholder="SKU"/><input type="number" value={variantDraft.local_price||''} onChange={e=>setVariantDraft(x=>({...x,local_price:Number(e.target.value)}))} placeholder={`Harga ${currency}`}/><input type="number" value={variantDraft.weight_grams||''} onChange={e=>setVariantDraft(x=>({...x,weight_grams:Number(e.target.value)}))} placeholder="Berat gram"/><button onClick={addVariant}><Plus size={14}/> Tambah kombinasi</button></div>
                 </article>
