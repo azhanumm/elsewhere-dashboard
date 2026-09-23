@@ -102,12 +102,25 @@ export function getOrderLifecycle(order: Pick<Order, 'status' | 'courier' | 'tra
     currentLabel: orderStatuses[order.status] ?? current.label,
   };
 }
-export function orderWhatsAppTemplates(order: Pick<Order, 'customer_name' | 'order_code' | 'phone' | 'status' | 'courier' | 'tracking_number' | 'total_idr'>) {
+export function orderWhatsAppTemplates(
+  order: Pick<Order, 'customer_name' | 'order_code' | 'phone' | 'status' | 'courier' | 'tracking_number' | 'total_idr'> & {
+    order_items?: Array<{
+      product_name: string;
+      variant_name?: string | null;
+      quantity?: number | null;
+    }>;
+  },
+) {
   const lifecycle = getOrderLifecycle(order);
   const statusUpdate = `Halo ${order.customer_name}, status pesanan ${order.order_code} saat ini: ${lifecycle.currentLabel}. ${lifecycle.phaseSummary} Jika ada perubahan, kami akan update kembali.`;
   const paymentReminder = `Halo ${order.customer_name}, berikut status pembayaran pesanan ${order.order_code}. Total tagihan ${Number(order.total_idr).toLocaleString('id-ID')} dan pembayaran masih belum terkonfirmasi. Mohon kirim bukti pembayaran agar proses order bisa lanjut.`;
   const proofSubmitted = `Halo Elsewhere, saya ingin konfirmasi pesanan ${order.order_code}. Bukti pembayaran sudah saya kirim dan saya menunggu konfirmasi dari tim.`;
-  const paymentConfirmation = `Halo ${order.customer_name}, pembayaran untuk pesanan ${order.order_code} sudah kami konfirmasi. Order kamu sudah diterima dan akan kami proses selanjutnya.`;
+  const productSummary = (order.order_items ?? []).length
+    ? (order.order_items ?? [])
+        .map((item) => `${item.product_name}${item.variant_name ? ` (${item.variant_name})` : ''} × ${item.quantity ?? 1}`)
+        .join(', ')
+    : 'Detail produk belum tersedia';
+  const paymentConfirmation = `Halo ${order.customer_name}! Pembayaran untuk pesanan ${order.order_code} sudah kami terima. Pesananmu resmi terkonfirmasi yaa\n\n*Detail pesanan*\n• Produk: ${productSummary}\n• Total pembayaran: Rp${Number(order.total_idr).toLocaleString('id-ID')}\n• Estimasi tiba di Indonesia: 17 November 2026\n\nKami kabari lagi saat pesananmu siap dikirim atau kalau ada update lainnya. Thank you sudah titip di Elsewhere & Co. 🛍️`;
   const trackingUpdate = `Halo ${order.customer_name}, pesanan ${order.order_code} sudah masuk tahap pengiriman. Kurir: ${order.courier || 'sedang dipilih'}${order.tracking_number ? `. Resi: ${order.tracking_number}` : ''}. Mohon konfirmasi saat paket sampai.`;
   return {
     statusUpdate,

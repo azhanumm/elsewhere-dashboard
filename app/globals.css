@@ -1684,8 +1684,8 @@ main {
 .order-detail button:not(.commerce-primary),.commerce-heading button,.catalogue-empty button { border:1px solid #d8c7d1;border-radius:8px;background:#faf5f8;color:#624153;padding:9px 12px;cursor:pointer; }
 .order-detail button:not(.commerce-primary):hover,.commerce-heading button:hover,.catalogue-empty button:hover { background:#f4eaef;border-color:#caa7b5; }
 .order-detail-sections { display:grid;gap:12px; }
-.order-detail-section { padding:14px 16px;border:1px solid #efe1e7;border-radius:12px;background:#fffdfd; }
-.order-detail-section h3 { margin:0 0 12px; }
+.order-detail-section { padding:14px 16px;border:1px solid #efe1e7;border-radius:12px;background:#fffdfd;display:grid;gap:16px; }
+.order-detail-section h3 { margin:0; font-size:14px; letter-spacing:.12em; text-transform:uppercase; color:#624153; }
 .order-detail-subsection { display:grid;gap:12px;padding-top:12px;border-top:1px solid #f0e3e8; }
 .order-detail-subsection:first-of-type { padding-top:0;border-top:0; }
 .order-detail-subsection h4 { margin:0;color:#624153;font-size:11px;letter-spacing:.10em;text-transform:uppercase; }
@@ -1705,6 +1705,12 @@ main {
 .payment-primary-action:disabled { opacity:.5;cursor:not-allowed; }
 .payment-secondary-action { display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:1px solid #dcc8d0;border-radius:10px;background:#fff;color:#624153;padding:9px 12px;cursor:pointer;font-weight:600; }
 .payment-secondary-action:hover { background:#f7edf1; }
+.order-status-section { background:linear-gradient(180deg,#fffdfd 0%,#fffafc 100%); }
+.order-status-header { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.order-status-badge { display:inline-flex;align-items:center;justify-content:center;padding:5px 10px;border-radius:999px;background:#f0e1e6;color:#624153;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase; }
+.order-status-summary { display:grid;gap:8px;padding:12px 14px;border:1px solid #ead5dd;border-radius:10px;background:#fff; }
+.order-status-summary strong { font-size:18px;color:#2d2126; }
+.order-status-summary p { margin:0;color:#695d66;font-size:12px;line-height:1.6; }
 .commerce-empty { padding:28px;font-size:14px;color:#796b77;line-height:1.6;background:#fff;border:1px dashed #e3d3d9;border-radius:14px; }
 .order-admin-actions { display:flex;justify-content:flex-end; }
 .mini-delete-button { border:1px solid #e7c7cd !important;background:transparent !important;color:#8a4052 !important;padding:7px 10px !important;border-radius:999px !important;font-size:11px !important; }
