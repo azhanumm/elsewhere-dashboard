@@ -14,6 +14,54 @@ Simpan backup database dari Supabase/pg_dump, termasuk schema, policies dan data
 
 Perubahan ini belum diterapkan ke database live. Jangan menjalankan migrasi pertama jauh sebelum deploy: migrasi mencabut akses tabel mentah anonymous yang digunakan frontend lama.
 
+## Hotfix darurat production: fungsi tidak ditemukan
+
+Kalau deployment sudah live tapi checkout error seperti `Could not find the function public.commerce_order_target` atau `public.commerce_place_order`, artinya project Supabase live belum menerima migrasi terbaru. Ini bukan bug pada React/Vercel; frontend baru sedang memanggil RPC yang belum ada di schema live.
+
+Langkah cepat:
+
+1. Buka Supabase SQL Editor untuk project yang dipakai Vercel/production.
+2. Jalankan semua migrasi di urutan ini satu per satu, berhenti jika ada error:
+
+```sql
+-- 1
+-- supabase/migrations/202609120001_commerce.sql
+
+-- 2
+-- supabase/migrations/202609130001_preorder_and_rates.sql
+
+-- 3
+-- supabase/migrations/202609130002_scheduled_rates.sql
+
+-- 4
+-- supabase/migrations/202609160001_easy_order_codes.sql
+
+-- 5
+-- supabase/migrations/202609160002_short_order_codes.sql
+
+-- 6
+-- supabase/migrations/202609160003_customer_payment_proof.sql
+```
+
+3. Setelah migrasi selesai, jalankan reload schema:
+
+```sql
+NOTIFY pgrst, 'reload schema';
+```
+
+4. Verifikasi fungsi ada di live schema:
+
+```sql
+select proname, nspname
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where proname in ('commerce_place_order', 'commerce_order_target', 'commerce_submit_payment');
+```
+
+5. Jika masih error, pastikan Vercel memakai Supabase project yang sama dan env `VITE_SUPABASE_URL` serta `VITE_SUPABASE_PUBLISHABLE_KEY` memang mengarah ke project yang baru dipasang migrasi.
+
+Catatan: jika project deployment sudah dipindah, `VITE_SUPABASE_URL` yang lama atau key yang salah akan membuat frontend tetap memanggil schema yang lama meski source-nya sudah diperbarui.
+
 ## Urutan aktivasi
 
 1. Gabungkan branch integrasi ke repository/branch yang dipakai project Vercel temanmu. Pastikan Vercel mengakses repository tersebut.
