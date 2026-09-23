@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { calculatePrice } from '../lib/pricing.ts';
 import {
+  createOrderDraftSnapshot,
   getOrderLifecycle,
   orderLifecycleStages,
   orderWhatsAppTemplates,
@@ -123,6 +124,22 @@ await test('order lifecycle stages and WhatsApp templates cover place-pay-shoppi
     /bukti pembayaran|konfirmasi/i,
   );
 });
+await test('order draft snapshot keeps photo preview data for purchased review', () => {
+  const draft = createOrderDraftSnapshot({
+    courier: 'JNE',
+    tracking: 'ABC123',
+    productPhotoName: 'produk.jpg',
+    productPhotoPreview: 'data:image/jpeg;base64,abc',
+    receiptPhotoName: 'resi.jpg',
+    receiptPhotoPreview: 'data:image/jpeg;base64,def',
+    status: 'purchased',
+  });
+
+  assert.equal(draft.productPhotoName, 'produk.jpg');
+  assert.match(draft.productPhotoPreview, /^data:image\//);
+  assert.equal(draft.receiptPhotoName, 'resi.jpg');
+  assert.match(draft.receiptPhotoPreview, /^data:image\//);
+});
 await test('legacy public catalogue exposes only approved open-trip products', async () => {
   await role('anon');
   const c = await catalogue();
@@ -198,6 +215,18 @@ await test('checkout snapshots price, reserves capacity and retries without a du
     price,
   );
   await db.exec('update trips set exchange_rate_idr=3500');
+});
+await test('cancelled orders can be permanently deleted by editors', async () => {
+  await owner();
+  const cancelledOrderId = crypto.randomUUID();
+  await db.exec(`insert into public.orders(id, request_id, order_code, trip_code, customer_name, phone, address, notes, total_idr, status, courier, tracking_number)
+    values('${cancelledOrderId}', '${crypto.randomUUID()}', 'EW-DELETE-1', 'TRIP-001', 'Budi', '081234567890', 'Jl. Contoh 123', '', 100000, 'cancelled', '', '')`);
+  await role('authenticated', '10000000-0000-4000-8000-000000000003', 'team@example.com');
+  await db.query('select commerce_delete_order($1)', [cancelledOrderId]);
+  assert.equal(
+    Number((await db.query('select count(*) as count from public.orders where id=$1', [cancelledOrderId])).rows[0].count),
+    0,
+  );
 });
 await test('nonmembers cannot read PII, change products, enroll themselves, or use staff RPCs', async () => {
   await role('authenticated', outsider, 'outsider@example.com');

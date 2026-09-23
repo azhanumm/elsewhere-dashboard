@@ -53,23 +53,22 @@ export type Order = {
   order_payments: Payment[];
 };
 export const orderStatuses: Record<string, string> = {
-  new: 'Baru',
-  confirmed: 'Dikonfirmasi',
-  purchased: 'Sudah dibeli',
-  arrived: 'Sudah tiba',
-  packed: 'Dikemas',
-  shipped: 'Dikirim',
-  completed: 'Selesai',
-  cancelled: 'Dibatalkan',
+  new: 'Placed',
+  confirmed: 'Paid',
+  purchased: 'Purchased',
+  arrived: 'Shipped to Indo',
+  shipped: 'Shipped to Cust',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
 };
 export const orderLifecycleStages = [
-  { id: 'new', label: 'Place', phase: 'place', description: 'Pesanan masuk dari katalog atau WhatsApp' },
-  { id: 'confirmed', label: 'Bayar', phase: 'pay', description: 'Menunggu / verifikasi pembayaran' },
-  { id: 'purchased', label: 'Belanja', phase: 'shopping', description: 'Barang sudah dibeli' },
-  { id: 'arrived', label: 'Tiba', phase: 'shopping', description: 'Barang sudah sampai di gudang' },
-  { id: 'packed', label: 'Packing', phase: 'packing', description: 'Siap dikirim dan dikemas' },
-  { id: 'shipped', label: 'Ngantar', phase: 'delivery', description: 'Dalam proses kirim ke pelanggan' },
-  { id: 'completed', label: 'Selesai', phase: 'delivery', description: 'Pesanan selesai' },
+  { id: 'new', label: 'Placed', phase: 'place', description: 'Order sudah checkout dan bukti pembayaran terkirim' },
+  { id: 'confirmed', label: 'Paid', phase: 'pay', description: 'Pembayaran sudah dikonfirmasi admin' },
+  { id: 'purchased', label: 'Purchased', phase: 'shopping', description: 'Barang sudah dibeli dan masuk proses pembelian' },
+  { id: 'arrived', label: 'Shipped to Indo', phase: 'shopping', description: 'Barang dikirim ke Indonesia' },
+  { id: 'packed', label: 'Shipped to Indo', phase: 'shopping', description: 'Legacy alias: barang dikirim ke Indonesia' },
+  { id: 'shipped', label: 'Shipped to Cust', phase: 'delivery', description: 'Barang dikirim ke customer' },
+  { id: 'completed', label: 'Completed', phase: 'delivery', description: 'Pesanan selesai dan sudah diterima customer' },
 ] as const;
 
 export const paidAmount = (order: Order) =>
@@ -82,16 +81,16 @@ export const paymentLabel = (order: Order) =>
     : 'Belum dibayar';
 export function getOrderLifecycle(order: Pick<Order, 'status' | 'courier' | 'tracking_number'>) {
   const stages = [...orderLifecycleStages];
-  const current = stages.find((stage) => stage.id === order.status) ?? stages[0];
+  const current = stages.find((stage) => stage.id === order.status) ?? stages.find((stage) => stage.id === 'arrived') ?? stages[0];
   const currentIndex = stages.findIndex((stage) => stage.id === current.id);
   const progress = order.status === 'cancelled' ? 0 : Number(((currentIndex + 1) / stages.length).toFixed(2));
   const next = stages[Math.min(currentIndex + 1, stages.length - 1)];
   const phaseSummary = {
-    place: 'Pesanan terdaftar dan siap untuk konfirmasi customer.',
-    pay: 'Pembayaran harus dikonfirmasi sebelum belanja / pengiriman.',
-    shopping: 'Barang sedang diproses, dicek, dan disiapkan di gudang.',
-    packing: 'Order sedang dikemas dan siap untuk dikirim.',
-    delivery: 'Pengiriman / penjemputan / penerimaan pelanggan sedang berjalan.',
+    place: 'Pesanan sudah checkout dan menunggu konfirmasi pembayaran.',
+    pay: 'Pembayaran sudah diterima dan order siap dilanjutkan ke proses pembelian.',
+    shopping: 'Barang sedang diproses, dibeli, dan dipersiapkan dari supplier ke Indonesia.',
+    packing: 'Barang sudah sampai di Indonesia dan sedang disiapkan untuk pengiriman.',
+    delivery: 'Pengiriman ke customer sedang berjalan sampai pesanan selesai.',
   }[current.phase] ?? 'Order sedang dipantau.';
   return {
     stages,
@@ -128,6 +127,22 @@ export function orderWhatsAppTemplates(
     proofSubmitted,
     paymentConfirmation,
     trackingUpdate,
+  };
+}
+export function createOrderDraftSnapshot(values: Record<string, string> = {}) {
+  const productPhotoName = values.productPhotoName || values.productPhoto || '';
+  const receiptPhotoName = values.receiptPhotoName || values.receiptPhoto || '';
+
+  return {
+    courier: values.courier || '',
+    tracking: values.tracking || '',
+    productPhoto: productPhotoName,
+    productPhotoName,
+    productPhotoPreview: values.productPhotoPreview || '',
+    receiptPhoto: receiptPhotoName,
+    receiptPhotoName,
+    receiptPhotoPreview: values.receiptPhotoPreview || '',
+    status: values.status || '',
   };
 }
 export function normalizePhone(value: string) {

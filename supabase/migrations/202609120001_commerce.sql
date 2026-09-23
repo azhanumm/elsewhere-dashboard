@@ -187,6 +187,17 @@ begin
  delete from public.order_payments where id=p_payment_id and verified_at is null;
  if not found then raise exception 'Hanya pembayaran belum diverifikasi yang dapat dihapus'; end if;
 end $$;
+create function public.commerce_delete_order(p_order_id uuid) returns void language plpgsql security definer set search_path = '' as $$
+declare o public.orders;
+begin
+ if not public.commerce_editor() then raise exception 'Akses ditolak: hanya owner/editor'; end if;
+ select * into o from public.orders where id=p_order_id for update;
+ if o.id is null then raise exception 'Pesanan tidak ditemukan'; end if;
+ if o.status <> 'cancelled' then raise exception 'Hanya pesanan yang sudah dibatalkan yang dapat dihapus'; end if;
+ delete from public.order_payments where order_id=o.id;
+ delete from public.order_items where order_id=o.id;
+ delete from public.orders where id=o.id;
+end $$;
 create function public.commerce_update_order(p_order_id uuid,p_status text,p_courier text default '',p_tracking text default '')
 returns void language plpgsql security definer set search_path = '' as $$
 declare o public.orders; paid numeric; seq text[] := array['new','confirmed','purchased','arrived','packed','shipped','completed'];
@@ -203,8 +214,8 @@ begin
  if length(p_courier)>100 or length(p_tracking)>100 then raise exception 'Kurir atau resi terlalu panjang'; end if;
  update public.orders set status=p_status,courier=trim(coalesce(p_courier,'')),tracking_number=trim(coalesce(p_tracking,'')),updated_at=now() where id=o.id;
 end $$;
-revoke all on function public.commerce_record_payment(uuid,uuid,numeric,text,text), public.commerce_verify_payment(uuid), public.commerce_remove_pending_payment(uuid), public.commerce_update_order(uuid,text,text,text) from public, anon, authenticated;
-grant execute on function public.commerce_record_payment(uuid,uuid,numeric,text,text), public.commerce_verify_payment(uuid), public.commerce_remove_pending_payment(uuid), public.commerce_update_order(uuid,text,text,text) to authenticated;
+revoke all on function public.commerce_record_payment(uuid,uuid,numeric,text,text), public.commerce_verify_payment(uuid), public.commerce_remove_pending_payment(uuid), public.commerce_delete_order(uuid), public.commerce_update_order(uuid,text,text,text) from public, anon, authenticated;
+grant execute on function public.commerce_record_payment(uuid,uuid,numeric,text,text), public.commerce_verify_payment(uuid), public.commerce_remove_pending_payment(uuid), public.commerce_delete_order(uuid), public.commerce_update_order(uuid,text,text,text) to authenticated;
 
 -- Private payment receipts; public product photos retain public delivery.
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
