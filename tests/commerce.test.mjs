@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { calculatePrice } from '../lib/pricing.ts';
+import {
+  getOrderLifecycle,
+  orderLifecycleStages,
+  orderWhatsAppTemplates,
+} from '../lib/commerce.ts';
 const db = new PGlite();
 const member = '10000000-0000-4000-8000-000000000001',
   outsider = '10000000-0000-4000-8000-000000000002';
@@ -76,6 +81,48 @@ async function place(id = crypto.randomUUID(), quantity = 1, expected = price) {
     )
   ).rows[0].data;
 }
+await test('order lifecycle stages and WhatsApp templates cover place-pay-shopping-delivery flow', async () => {
+  const order = {
+    id: 'order-1',
+    order_code: 'EW-123',
+    trip_code: 'TRIP-001',
+    customer_name: 'Budi',
+    phone: '081234567890',
+    address: 'Jl. Contoh 123',
+    notes: 'mau dikirim siang',
+    total_idr: 500000,
+    status: 'packed',
+    courier: 'JNE',
+    tracking_number: 'JNEX123',
+    created_at: '2026-09-01T00:00:00Z',
+    order_items: [],
+    order_payments: [{
+      id: 'payment-1',
+      amount_idr: 500000,
+      reference: 'BCA-001',
+      receipt_path: null,
+      verified_at: '2026-09-01T01:00:00Z',
+      created_at: '2026-09-01T00:30:00Z',
+    }],
+  };
+  const lifecycle = getOrderLifecycle(order);
+  assert.ok(orderLifecycleStages.some((stage) => stage.id === 'packed'));
+  assert.equal(lifecycle.current.id, 'packed');
+  assert.equal(lifecycle.progress, 0.71);
+  assert.match(
+    orderWhatsAppTemplates(order).trackingUpdate,
+    /resi|tracking/i,
+  );
+  assert.match(orderWhatsAppTemplates(order).statusUpdate, /Budi|EW-123/i);
+  assert.match(
+    orderWhatsAppTemplates(order).paymentConfirmation,
+    /sudah kami konfirmasi|pesanan/i,
+  );
+  assert.match(
+    orderWhatsAppTemplates(order).proofSubmitted,
+    /bukti pembayaran|konfirmasi/i,
+  );
+});
 await test('legacy public catalogue exposes only approved open-trip products', async () => {
   await role('anon');
   const c = await catalogue();
