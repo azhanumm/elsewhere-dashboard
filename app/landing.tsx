@@ -9,6 +9,15 @@ import { rupiah } from '../lib/pricing';
 import ProductPhoto from '../components/product-photo';
 import { CartButton, CartDialog, ProductDetail, CheckoutDialog, type CartItem } from '../components/storefront-commerce';
 
+const categoryTone = (category: string) => {
+  const value = category.toLowerCase();
+  if (/beauty|skincare|makeup|kosmetik|kecantikan/.test(value)) return 'blue';
+  if (/food|snack|makanan|minuman|drink/.test(value)) return 'yellow';
+  if (/obat|kesehatan|suplemen|vitamin|health/.test(value)) return 'sage';
+  if (/fashion|pakaian|baju|hijab|shawl|abaya/.test(value)) return 'pink';
+  return 'ivory';
+};
+
 export default function Landing() {
   const [items, setItems] = useState<PublicProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,7 +163,7 @@ export default function Landing() {
               const variants = p.product_variants || [];
               const v = variants[0];
               return (
-                <article className="product-card" key={p.id}>
+                <article className="product-card" data-tone={categoryTone(p.category)} key={p.id}>
                   <div className="product-photo">
                     <ProductPhoto key={`${p.id}-${v?.id || 'default'}`} product={p} variant={v} alt={`${p.name}${v ? ` — ${v.name}` : ''}`}/>
 
