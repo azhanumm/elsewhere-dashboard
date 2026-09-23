@@ -62,6 +62,16 @@ export const orderStatuses: Record<string, string> = {
   completed: 'Selesai',
   cancelled: 'Dibatalkan',
 };
+export const orderLifecycleStages = [
+  { id: 'new', label: 'Place', phase: 'place', description: 'Pesanan masuk dari katalog atau WhatsApp' },
+  { id: 'confirmed', label: 'Bayar', phase: 'pay', description: 'Menunggu / verifikasi pembayaran' },
+  { id: 'purchased', label: 'Belanja', phase: 'shopping', description: 'Barang sudah dibeli' },
+  { id: 'arrived', label: 'Tiba', phase: 'shopping', description: 'Barang sudah sampai di gudang' },
+  { id: 'packed', label: 'Packing', phase: 'packing', description: 'Siap dikirim dan dikemas' },
+  { id: 'shipped', label: 'Ngantar', phase: 'delivery', description: 'Dalam proses kirim ke pelanggan' },
+  { id: 'completed', label: 'Selesai', phase: 'delivery', description: 'Pesanan selesai' },
+] as const;
+
 export const paidAmount = (order: Order) =>
   order.order_payments
     .filter((p) => p.verified_at)
@@ -69,9 +79,44 @@ export const paidAmount = (order: Order) =>
 export const paymentLabel = (order: Order) =>
   paidAmount(order) >= Number(order.total_idr)
     ? 'Lunas'
-    : paidAmount(order) > 0
-      ? 'DP diterima'
-      : 'Belum dibayar';
+    : 'Belum dibayar';
+export function getOrderLifecycle(order: Pick<Order, 'status' | 'courier' | 'tracking_number'>) {
+  const stages = [...orderLifecycleStages];
+  const current = stages.find((stage) => stage.id === order.status) ?? stages[0];
+  const currentIndex = stages.findIndex((stage) => stage.id === current.id);
+  const progress = order.status === 'cancelled' ? 0 : Number(((currentIndex + 1) / stages.length).toFixed(2));
+  const next = stages[Math.min(currentIndex + 1, stages.length - 1)];
+  const phaseSummary = {
+    place: 'Pesanan terdaftar dan siap untuk konfirmasi customer.',
+    pay: 'Pembayaran harus dikonfirmasi sebelum belanja / pengiriman.',
+    shopping: 'Barang sedang diproses, dicek, dan disiapkan di gudang.',
+    packing: 'Order sedang dikemas dan siap untuk dikirim.',
+    delivery: 'Pengiriman / penjemputan / penerimaan pelanggan sedang berjalan.',
+  }[current.phase] ?? 'Order sedang dipantau.';
+  return {
+    stages,
+    current,
+    next,
+    progress,
+    phaseSummary,
+    currentLabel: orderStatuses[order.status] ?? current.label,
+  };
+}
+export function orderWhatsAppTemplates(order: Pick<Order, 'customer_name' | 'order_code' | 'phone' | 'status' | 'courier' | 'tracking_number' | 'total_idr'>) {
+  const lifecycle = getOrderLifecycle(order);
+  const statusUpdate = `Halo ${order.customer_name}, status pesanan ${order.order_code} saat ini: ${lifecycle.currentLabel}. ${lifecycle.phaseSummary} Jika ada perubahan, kami akan update kembali.`;
+  const paymentReminder = `Halo ${order.customer_name}, berikut status pembayaran pesanan ${order.order_code}. Total tagihan ${Number(order.total_idr).toLocaleString('id-ID')} dan pembayaran masih belum terkonfirmasi. Mohon kirim bukti pembayaran agar proses order bisa lanjut.`;
+  const proofSubmitted = `Halo Elsewhere, saya ingin konfirmasi pesanan ${order.order_code}. Bukti pembayaran sudah saya kirim dan saya menunggu konfirmasi dari tim.`;
+  const paymentConfirmation = `Halo ${order.customer_name}, pembayaran untuk pesanan ${order.order_code} sudah kami konfirmasi. Order kamu sudah diterima dan akan kami proses selanjutnya.`;
+  const trackingUpdate = `Halo ${order.customer_name}, pesanan ${order.order_code} sudah masuk tahap pengiriman. Kurir: ${order.courier || 'sedang dipilih'}${order.tracking_number ? `. Resi: ${order.tracking_number}` : ''}. Mohon konfirmasi saat paket sampai.`;
+  return {
+    statusUpdate,
+    paymentReminder,
+    proofSubmitted,
+    paymentConfirmation,
+    trackingUpdate,
+  };
+}
 export function normalizePhone(value: string) {
   const digits = value.replace(/[\s()+-]/g, '');
   return digits.startsWith('0') ? `62${digits.slice(1)}` : digits;
