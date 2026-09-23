@@ -412,11 +412,26 @@ function OrderDetail({
           </div>
         </section>
 
-        <section className="order-detail-section">
-          <h3>Pengiriman</h3>
-          <p className="commerce-help">
-            Ongkir domestik dikonfirmasi dan dicatat terpisah dari tagihan barang.
-          </p>
+        <section className="order-detail-section order-status-section">
+          <div className="order-status-header">
+            <h3>Status & pengiriman</h3>
+            <span className="order-status-badge">{orderStatuses[status] || 'Status'}</span>
+          </div>
+
+          <div className="order-status-summary">
+            <strong>{orderStatuses[status] || 'Status'}</strong>
+            <p>
+              {status === 'new' && 'Pesanan baru menunggu konfirmasi pembayaran.'}
+              {status === 'confirmed' && 'Pembayaran sudah diterima, order siap diproses.'}
+              {status === 'purchased' && 'Barang sudah dibeli dan sedang dalam tahap pengiriman ke Indonesia.'}
+              {status === 'arrived' && 'Barang sudah tiba di Indonesia dan siap diproses lebih lanjut.'}
+              {status === 'packed' && 'Barang sedang dikemas untuk pengiriman ke customer.'}
+              {status === 'shipped' && 'Pesanan sedang dalam proses pengiriman ke customer.'}
+              {status === 'completed' && 'Pesanan sudah sampai dan selesai.'}
+              {status === 'cancelled' && 'Pesanan dibatalkan.'}
+            </p>
+          </div>
+
           {message && <output className="commerce-message">{message}</output>}
           <form
             onSubmit={(e) => {
@@ -444,30 +459,36 @@ function OrderDetail({
                   ))}
                 </select>
               </label>
-              <label>
-                Kurir
-                <input
-                  maxLength={100}
-                  value={courier}
-                  onChange={(e) => setCourier(e.target.value)}
-                  placeholder="JNE / J&T / lainnya"
-                />
-              </label>
-              <label>
-                Nomor resi
-                <input
-                  maxLength={100}
-                  value={tracking}
-                  onChange={(e) => setTracking(e.target.value)}
-                />
-              </label>
+
+              {['purchased', 'arrived', 'packed', 'shipped', 'completed'].includes(status) && (
+                <>
+                  <label>
+                    Kurir / jasa pengiriman
+                    <input
+                      maxLength={100}
+                      value={courier}
+                      onChange={(e) => setCourier(e.target.value)}
+                      placeholder="JNE / J&T / DHL / air cargo / lainnya"
+                    />
+                  </label>
+                  <label>
+                    Nomor resi / link tracking
+                    <input
+                      maxLength={200}
+                      value={tracking}
+                      onChange={(e) => setTracking(e.target.value)}
+                      placeholder="Masukkan nomor resi atau link tracking"
+                    />
+                  </label>
+                </>
+              )}
+
               <button type="submit" className="commerce-primary">
                 Simpan status
               </button>
             </fieldset>
             <p className="commerce-help">
-              Status maju berurutan. Pengiriman memerlukan pembayaran lunas dan
-              resi. Pembatalan hanya sebelum pembelian, tanpa catatan pembayaran.
+              Status maju berurutan. Untuk tahap pembelian, pengiriman ke Indonesia, dan pengiriman ke customer, masukkan kurir dan nomor tracking bila sudah tersedia.
             </p>
           </form>
         </section>
