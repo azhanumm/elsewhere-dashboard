@@ -31,6 +31,8 @@ Optional if used elsewhere:
 
 ## Database / Supabase check
 Before production checkout works, run the latest migration files in Supabase SQL Editor in order.
+
+The multi-product cart requires `supabase/migrations/202609240001_cart_checkout_and_legacy_variants.sql`. Deploy it before or together with the matching frontend so `commerce_place_order_items` is available when checkout opens.
 This repo already documents the required migration sequence in [DEPLOY.md](DEPLOY.md).
 
 If the frontend starts throwing `Could not find the function public.commerce_*`, it means the live Supabase project is still on an older schema.

@@ -117,6 +117,8 @@ Untuk database yang sudah memakai seluruh migrasi commerce sebelumnya, jalankan 
 
 Untuk editor varian dua pilihan dan upload foto varian, jalankan `supabase/migrations/202609150001_variant_options.sql` setelah migrasi di atas. Migrasi ini menambahkan label pilihan pada produk dan nilai pilihan pada varian, lalu memperbarui RPC katalog publik. Snapshot order lama tidak berubah.
 
+Untuk checkout keranjang multi-produk dan kompatibilitas varian lama, jalankan `supabase/migrations/202609240001_cart_checkout_and_legacy_variants.sql` setelah seluruh migrasi sebelumnya. Migrasi ini menyimpan satu keranjang sebagai satu order dengan beberapa `order_items` secara atomik. Varian lama yang belum memiliki nilai pilihan dipindahkan secara lossless ke Pilihan 1 memakai nama varian yang sudah ada; ID, SKU, harga, berat, foto, stok/kuota, status aktif, serta relasi ke order lama tidak diubah.
+
 Import link foto Excel ke `product_variants.photo_url` dengan mencocokkan ID varian atau SKU yang unik dalam produk, bukan nama produk saja. Jangan overwrite foto existing dengan sel Excel kosong. Pastikan link adalah URL gambar http/https langsung yang bisa diakses publik. Jika importer versi deployed memakai nama kolom lain, petakan kolom itu terlebih dahulu. Link website saja tidak cukup untuk mengetahui isi Excel atau mengisi foto yang belum tersimpan.
 
 Cek sesudah update: pilih dua varian dengan foto berbeda di katalog publik, pastikan foto dan harga ikut berubah; link kosong/rusak kembali ke foto produk. Cek harga dan profit satu varian terhadap modalnya dan pastikan invoice/order lama tetap sama. Informasi modal/profit tidak ditambahkan ke RPC katalog publik.

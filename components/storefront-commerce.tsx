@@ -44,6 +44,7 @@ export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
   if (!product) return null;
   const option1Values = getOptionValues(variants, 'option1_value') as string[];
   const option2Values = getOptionValues(variants, 'option2_value') as string[];
+  const legacyVariants = variants.filter((variant) => !variant.option1_value && !variant.option2_value);
   const selectedOption1 = selected?.option1_value ?? '';
   const selectedOption2 = selected?.option2_value ?? '';
   const compatibleOption2Values = selectedOption1 ? getCompatibleOptionValues(variants, 'option1_value', selectedOption1, 'option2_value') : option2Values;
@@ -51,10 +52,11 @@ export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
   const chooseOption = (key: 'option1_value' | 'option2_value', value: string) => {
     if (key === 'option1_value') {
       const nextOption1 = value;
-      const nextOption2 = selectedOption2 && getCompatibleOptionValues(variants, 'option1_value', nextOption1, 'option2_value').includes(selectedOption2)
+      const compatibleOption2 = getCompatibleOptionValues(variants, 'option1_value', nextOption1, 'option2_value');
+      const nextOption2 = selectedOption2 && compatibleOption2.includes(selectedOption2)
         ? selectedOption2
-        : getCompatibleOptionValues(variants, 'option1_value', nextOption1, 'option2_value')[0] ?? '';
-      const match = nextOption2 ? findMatchingVariant(variants, nextOption1, nextOption2) : null;
+        : compatibleOption2[0] ?? '';
+      const match = findMatchingVariant(variants, nextOption1, nextOption2);
       setSelectedId(match ? match.id : '');
       return;
     }
@@ -88,7 +90,7 @@ export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
           <p className="product-detail-note">Termasuk kargo internasional. Ongkir domestik dikonfirmasi terpisah.</p>
           {option1Values.length > 0 && <fieldset className="variant-choices"><legend>{product.option1_label || 'Pilihan'}</legend><div>{option1Values.map((value) => <button type="button" className={selectedOption1 === value ? 'selected' : ''} key={value} disabled={isOption1Disabled(value)} onClick={() => chooseOption('option1_value', value)}>{value}</button>)}</div></fieldset>}
           {option2Values.length > 0 && <fieldset className="variant-choices"><legend>{product.option2_label || 'Ukuran'}</legend><div>{option2Values.map((value) => <button type="button" className={selectedOption2 === value ? 'selected' : ''} key={value} disabled={isOption2Disabled(value)} onClick={() => chooseOption('option2_value', value)}>{value}</button>)}</div></fieldset>}
-          {!option1Values.length && !option2Values.length && variants.length > 1 && <label className="variant-select-label">Pilihan<select value={selected?.id || ''} onChange={(event) => setSelectedId(event.target.value)}>{variants.map((variant) => <option value={variant.id} key={variant.id}>{variant.name}</option>)}</select></label>}
+          {legacyVariants.length > 0 && <fieldset className="variant-choices"><legend>Pilihan</legend><div>{legacyVariants.map((variant) => <button type="button" className={selected?.id === variant.id ? 'selected' : ''} key={variant.id} onClick={() => setSelectedId(variant.id)}>{variant.name}</button>)}</div></fieldset>}
           <div className="product-detail-availability">{selected?.sale_mode === 'stock' ? 'Ready stock' : 'Pre order'}{selected?.available !== null ? ` · ${selected?.available || 0} tersedia` : ' · Kuota terbuka'}</div>
           <div className="quantity-control"><span>Jumlah</span><div><button type="button" aria-label="Kurangi jumlah" onClick={() => setQuantity((value) => Math.max(1, value - 1))}><Minus size={15} /></button><strong>{quantity}</strong><button type="button" aria-label="Tambah jumlah" onClick={() => setQuantity((value) => Math.min(maxQuantity, value + 1))}><Plus size={15} /></button></div></div>
           <button className="commerce-primary storefront-add-button" type="button" disabled={unavailable} onClick={() => { if (!selected) return; onAdd({ product, variant: selected, quantity }); onClose(); }}>{unavailable ? 'Tidak tersedia' : 'Tambah ke keranjang'}</button>
@@ -116,6 +118,8 @@ export function CheckoutDialog({ items, onClose, onComplete, onFinished }: Check
   const [paymentError, setPaymentError] = useState('');
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  // Reuse this token after a network failure so a retry returns the same order.
+  const requestId = useRef(crypto.randomUUID());
   const whatsapp = normalizePhone(import.meta.env.VITE_WHATSAPP_NUMBER || '');
   const qrisUrl = import.meta.env.VITE_QRIS_IMAGE_URL || '/QRIS.PNG';
   const total = items.reduce((sum, item) => sum + Number(item.variant.unit_price_idr || 0) * item.quantity, 0);
@@ -136,24 +140,20 @@ export function CheckoutDialog({ items, onClose, onComplete, onFinished }: Check
     if (!/^[0-9]{9,15}$/.test(normalizePhone(draft.phone))) { setError('Isi nomor WhatsApp yang valid, misalnya 081234567890.'); return; }
     setBusy(true); setError('');
     try {
-      const created: PaymentReceipt[] = [];
-      for (const item of items) {
-        const { data, error: failure } = await supabase.rpc('commerce_place_order', {
-          p_request_id: crypto.randomUUID(),
-          p_variant_id: item.variant.id,
-          p_quantity: item.quantity,
-          p_expected_price: item.variant.unit_price_idr,
-          p_name: draft.name.trim(),
-          p_phone: normalizePhone(draft.phone),
-          p_address: draft.address.trim(),
-          p_notes: draft.notes.trim(),
-        });
-        if (failure) throw failure;
-        const { data: target, error: targetError } = await supabase.rpc('commerce_order_target', { p_order_code: data.order_code });
-        if (targetError || !target?.order_id) throw targetError || new Error('Nomor pesanan belum siap. Muat ulang dan coba lagi.');
-        created.push({ ...data, order_id: target.order_id });
-      }
-      setReceipts(created);
+      const { data, error: failure } = await supabase.rpc('commerce_place_order_items', {
+        p_request_id: requestId.current,
+        p_items: items.map((item) => ({
+          variant_id: item.variant.id,
+          quantity: item.quantity,
+          expected_price: item.variant.unit_price_idr,
+        })),
+        p_name: draft.name.trim(),
+        p_phone: normalizePhone(draft.phone),
+        p_address: draft.address.trim(),
+        p_notes: draft.notes.trim(),
+      });
+      if (failure) throw failure;
+      setReceipts([data as PaymentReceipt]);
       onComplete(items);
     } catch (failure) {
       setError((failure as Error).message || 'Pesanan belum dapat dikonfirmasi. Coba lagi dengan data yang sama.');

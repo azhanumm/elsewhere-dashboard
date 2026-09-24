@@ -547,4 +547,38 @@ await test('fractional rupiah always rounds up to the next thousand', async () =
   assert.equal(Number(result), 1000);
   assert.equal(calculatePrice(input).sell, 1000);
 });
+await test('cart checkout creates one atomic order with every product and preserves legacy variants', async () => {
+  await owner();
+  await db.exec(await readFile(new URL('../supabase/migrations/202609150001_variant_options.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/202609240001_cart_checkout_and_legacy_variants.sql', import.meta.url), 'utf8'));
+  assert.equal((await db.query('select option1_value from product_variants where id=$1', [variant])).rows[0].option1_value, 'M');
+  assert.equal((await db.query('select option1_label from products where id=$1', [product])).rows[0].option1_label, 'Pilihan');
+
+  await db.exec('delete from order_payments; delete from order_items; delete from orders;');
+  const secondProduct = '20000000-0000-4000-8000-000000000002';
+  const secondVariant = '30000000-0000-4000-8000-000000000002';
+  await db.query(`insert into products(id,trip_code,name,brand,category,photo_url,published,status,approved_at,margin_percent)
+    values($1,'TRIP-001','Second Bag','Elsewhere','Pakaian','',true,'Ready',now(),30)`, [secondProduct]);
+  await db.query(`insert into product_variants(id,product_id,name,local_price,weight_grams,stock,active,sale_mode,preorder_capacity,photo_url,option1_value)
+    values($1,$2,'L',100,500,0,true,'preorder',null,'','L')`, [secondVariant, secondProduct]);
+
+  await role('anon');
+  const token = crypto.randomUUID();
+  const items = [
+    { variant_id: variant, quantity: 1, expected_price: 514000 },
+    { variant_id: secondVariant, quantity: 2, expected_price: 514000 },
+  ];
+  const result = (await db.query(
+    'select commerce_place_order_items($1,$2,$3,$4,$5,$6) as data',
+    [token, JSON.stringify(items), 'Cart Customer', '628777777777', 'Jalan Contoh 123, Makassar 90111', ''],
+  )).rows[0].data;
+  assert.equal(result.total_idr, 1542000);
+  assert.deepEqual((await db.query(
+    'select commerce_place_order_items($1,$2,$3,$4,$5,$6) as data',
+    [token, JSON.stringify(items), 'Cart Customer', '628777777777', 'Jalan Contoh 123, Makassar 90111', ''],
+  )).rows[0].data, result);
+  await owner();
+  assert.equal((await db.query('select count(*)::int as n from orders')).rows[0].n, 1);
+  assert.equal((await db.query('select count(*)::int as n from order_items where order_id=$1', [result.order_id])).rows[0].n, 2);
+});
 await db.close();

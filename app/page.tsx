@@ -775,7 +775,28 @@ export function Dashboard() {
   };
   const uploadVariantPhoto=async(variant:Variant,file:File)=>{if(!variantProduct)return;setSyncStatus('Mengunggah foto varian…');const ext=file.name.split('.').pop()?.toLowerCase()||'jpg';const path=`${variantProduct.trip_code}/${variantProduct.id}/variants/${variant.id}-${Date.now()}.${ext}`;const{error}=await supabase.storage.from('product-images').upload(path,file,{upsert:false});if(error){setSyncStatus('Gagal mengunggah foto varian');return}const{data}=supabase.storage.from('product-images').getPublicUrl(path);await saveVariant(variant.id,'photo_url',data.publicUrl);updateVariant(variant.id,'photo_url',data.publicUrl);setSyncStatus('Foto varian tersimpan')};
   const togglePublish=async(product:Product)=>{setSyncStatus(product.published?'Menarik produk dari landing page…':'Menyetujui produk…');const next=!product.published;if(next && !(rate>0)){setSyncStatus("Tunggu kurs otomatis sebelum publikasi");return;}const{error}=await supabase.from('products').update({published:next,approved_at:next?new Date().toISOString():null,approved_by:next?user?.id:null,currency_code:currency,currency_symbol:currencySymbol,fashion_cargo_per_kg:cargoRate,nonfashion_cargo_per_kg:otherCargoRate,status:next?'Ready':product.status}).eq('id',product.id);setSyncStatus(error?'Gagal mengubah publikasi':next?'Produk tayang di landing page':'Produk disembunyikan');if(!error){setCatalogue(rows=>rows.map(x=>x.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x));setVariantProduct(x=>x?.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x)}};
-  const openVariants=async(product:Product)=>{setVariantProduct(product);const{data}=await supabase.from('product_variants').select('*').eq('product_id',product.id).order('created_at');setVariants((data||[]) as Variant[])};
+  const hydrateVariantEditor=(rows:Variant[],product:Product)=>{
+    setVariants(rows);
+    const option1List = Array.from(new Set(rows.map((row) => row.option1_value || (!row.option2_value ? row.name : null)).filter(Boolean))) as string[];
+    const option2List = Array.from(new Set(rows.map((row) => row.option2_value).filter(Boolean))) as string[];
+    setOption1ValuesText(option1List.join('\n'));
+    setOption2ValuesText(option2List.join('\n'));
+    const nextAssignments: Record<string,{selected:string[];price:number;weight_grams:number;photo_url:string;sale_mode:"stock"|"preorder";preorder_capacity:number|null}> = {};
+    for (const option1 of option1List) {
+      const matchingRows = rows.filter((row) => (row.option1_value || (!row.option2_value ? row.name : null)) === option1);
+      const base = matchingRows[0];
+      nextAssignments[option1] = {
+        selected: matchingRows.map((row) => row.option2_value).filter(Boolean) as string[],
+        price: Number(base?.local_price ?? product.local_price ?? 0),
+        weight_grams: Number(base?.weight_grams ?? product.weight_grams ?? 0),
+        photo_url: base?.photo_url ?? product.photo_url ?? '',
+        sale_mode: (base?.sale_mode ?? 'preorder') as 'stock' | 'preorder',
+        preorder_capacity: base?.preorder_capacity ?? null,
+      };
+    }
+    setOption1Assignments(nextAssignments);
+  };
+  const openVariants=async(product:Product)=>{setVariantProduct(product);const{data}=await supabase.from('product_variants').select('*').eq('product_id',product.id).order('created_at');hydrateVariantEditor((data||[]) as Variant[],product)};
   const openProductEditor=async(product:Product)=>{
     scrollPositions.current.catalogue = window.scrollY;
     catalogueReturn.current = { id: product.id, y: window.scrollY };
@@ -915,23 +936,7 @@ export function Dashboard() {
     setView("product");
     supabase.from("product_variants").select("*").eq("product_id",product.id).order("created_at").then(({data})=>{
       const rows=(data||[]) as Variant[];
-      setVariants(rows);
-      const option1List = Array.from(new Set(rows.map((row) => row.option1_value).filter(Boolean))) as string[];
-      const option2List = Array.from(new Set(rows.map((row) => row.option2_value).filter(Boolean))) as string[];
-      setOption1ValuesText(option1List.join('\n'));
-      setOption2ValuesText(option2List.join('\n'));
-      const nextAssignments: Record<string,{selected:string[];price:number;weight_grams:number;photo_url:string;sale_mode:"stock"|"preorder";preorder_capacity:number|null}> = {};
-      for (const option1 of option1List) {
-        nextAssignments[option1] = {
-          selected: rows.filter((row) => row.option1_value === option1 && row.option2_value).map((row) => row.option2_value as string),
-          price: Number(rows.find((row) => row.option1_value === option1)?.local_price ?? product.local_price ?? 0),
-          weight_grams: Number(rows.find((row) => row.option1_value === option1)?.weight_grams ?? product.weight_grams ?? 0),
-          photo_url: rows.find((row) => row.option1_value === option1)?.photo_url ?? product.photo_url ?? '',
-          sale_mode: (rows.find((row) => row.option1_value === option1)?.sale_mode ?? 'preorder') as 'stock' | 'preorder',
-          preorder_capacity: rows.find((row) => row.option1_value === option1)?.preorder_capacity ?? null,
-        };
-      }
-      setOption1Assignments(nextAssignments);
+      hydrateVariantEditor(rows,product);
     });
   },[catalogue,variantProduct?.id]);
   useEffect(()=>{
@@ -1731,7 +1736,7 @@ export function Dashboard() {
                   <div className="variant-matrix-editor">
                     {parseOptionList(option1ValuesText).map((option1) => {
                       const assignment = option1Assignments[option1] ?? { selected: parseOptionList(option2ValuesText), price: Number(variantProduct.local_price || 0), weight_grams: Number(variantProduct.weight_grams || 0), photo_url: variantProduct.photo_url || '', sale_mode: 'preorder' as const, preorder_capacity: null };
-                      const option1Variants = variants.filter((row) => row.option1_value === option1);
+                      const option1Variants = variants.filter((row) => (row.option1_value || (!row.option2_value ? row.name : null)) === option1);
                       return <div className="variant-matrix-card" key={option1}>
                         <div className="variant-matrix-header">
                           <strong>{option1}</strong>
@@ -1752,7 +1757,7 @@ export function Dashboard() {
                               <div className="variant-matrix-row" key={v.id}>
                                 <div className="variant-photo-preview"><ProductPhoto key={`${v.id}-${v.photo_url}`} variant={v} product={variantProduct} alt={`${variantProduct.name} — ${variantDisplayName(v)}`}/></div>
                                 <div className="variant-editor-fields">
-                                  <label>{variantProduct.option1_label || "Pilihan 1"}<input value={v.option1_value || ""} placeholder="Contoh: Sweater" onChange={e=>updateVariant(v.id,"option1_value",e.target.value)} onBlur={e=>saveVariantOption(v,"option1_value",e.target.value.trim())}/></label>
+                                  <label>{variantProduct.option1_label || "Pilihan 1"}<input value={v.option1_value || (!v.option2_value ? v.name : "")} placeholder="Contoh: Sweater" onChange={e=>{const value=e.target.value;updateVariant(v.id,"option1_value",value);setOption1ValuesText(current=>parseOptionList(current).map(item=>item===option1?value:item).filter(Boolean).join('\n'))}} onBlur={e=>saveVariantOption(v,"option1_value",e.target.value.trim())}/></label>
                                   <label>{variantProduct.option2_label || "Pilihan 2"}<input value={v.option2_value || ""} placeholder="Contoh: Garret" onChange={e=>updateVariant(v.id,"option2_value",e.target.value)} onBlur={e=>saveVariantOption(v,"option2_value",e.target.value.trim())}/></label>
                                   <label>SKU<input value={v.sku || ""} onChange={e=>updateVariant(v.id,"sku",e.target.value)} onBlur={e=>saveVariant(v.id,"sku",e.target.value.trim())}/></label>
                                   <label>Foto varian<input type="url" aria-label={`Link foto ${variantDisplayName(v)}`} value={v.photo_url || ''} placeholder="https://… (opsional)" onChange={e=>updateVariant(v.id,'photo_url',e.target.value)} onBlur={e=>{const url=e.target.value.trim();if(url&&!/^https?:\/\//i.test(url)){setSyncStatus('Gunakan link foto http atau https');return;}saveVariant(v.id,'photo_url',url)}}/><input type="file" accept="image/jpeg,image/png,image/webp" aria-label={`Upload foto ${variantDisplayName(v)}`} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadVariantPhoto(v,file)}}/><small>Upload file atau tempel link. Kosong memakai foto produk.</small></label>
