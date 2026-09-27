@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Download, Minus, Plus, ShoppingBag, X } from 'lucide-react';
 import type { CatalogueProduct, CatalogueVariant } from '../lib/commerce';
 import { normalizePhone } from '../lib/commerce';
 import { rupiah } from '../lib/pricing';
 import ProductPhoto from './product-photo';
 import { supabase } from '../lib/supabase';
-import { findMatchingVariant, getCompatibleOptionValues, getOptionValues } from '../lib/variant-selection.js';
+import { findMatchingVariant, getCompatibleOptionValues, getOptionValues, normalizeVariantOptions } from '../lib/variant-selection.js';
 
 export type CartItem = {
   product: CatalogueProduct;
@@ -22,7 +22,10 @@ type ProductDetailProps = {
 export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
   const [selectedId, setSelectedId] = useState('');
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const variants = product?.product_variants || [];
+  const variants = useMemo(
+    () => normalizeVariantOptions(product?.product_variants || []) as CatalogueVariant[],
+    [product],
+  );
   const selected = selectedId ? variants.find((variant) => variant.id === selectedId) : undefined;
   const [quantity, setQuantity] = useState(1);
 
@@ -41,10 +44,8 @@ export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
     }
   }, [product, selectedId, variants]);
 
-  if (!product) return null;
   const option1Values = getOptionValues(variants, 'option1_value') as string[];
   const option2Values = getOptionValues(variants, 'option2_value') as string[];
-  const legacyVariants = variants.filter((variant) => !variant.option1_value && !variant.option2_value);
   const selectedOption1 = selected?.option1_value ?? '';
   const selectedOption2 = selected?.option2_value ?? '';
   const compatibleOption2Values = selectedOption1 ? getCompatibleOptionValues(variants, 'option1_value', selectedOption1, 'option2_value') : option2Values;
@@ -68,10 +69,12 @@ export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
   const isOption2Disabled = (value: string) => !!selectedOption1 && !compatibleOption2Values.includes(value);
 
   useEffect(() => {
-    if (!selected && variants.length === 1) {
+    if (product && !selected && variants.length === 1) {
       setSelectedId(variants[0].id);
     }
-  }, [selected, variants]);
+  }, [product, selected, variants]);
+
+  if (!product) return null;
 
   const maxQuantity = Math.min(20, selected?.available ?? 20);
   const unavailable = !selected || !selected.unit_price_idr || (selected.available !== null && selected.available < 1);
@@ -90,7 +93,6 @@ export function ProductDetail({ product, onClose, onAdd }: ProductDetailProps) {
           <p className="product-detail-note">Termasuk kargo internasional. Ongkir domestik dikonfirmasi terpisah.</p>
           {option1Values.length > 0 && <fieldset className="variant-choices"><legend>{product.option1_label || 'Pilihan'}</legend><div>{option1Values.map((value) => <button type="button" className={selectedOption1 === value ? 'selected' : ''} key={value} disabled={isOption1Disabled(value)} onClick={() => chooseOption('option1_value', value)}>{value}</button>)}</div></fieldset>}
           {option2Values.length > 0 && <fieldset className="variant-choices"><legend>{product.option2_label || 'Ukuran'}</legend><div>{option2Values.map((value) => <button type="button" className={selectedOption2 === value ? 'selected' : ''} key={value} disabled={isOption2Disabled(value)} onClick={() => chooseOption('option2_value', value)}>{value}</button>)}</div></fieldset>}
-          {legacyVariants.length > 0 && <fieldset className="variant-choices"><legend>Pilihan</legend><div>{legacyVariants.map((variant) => <button type="button" className={selected?.id === variant.id ? 'selected' : ''} key={variant.id} onClick={() => setSelectedId(variant.id)}>{variant.name}</button>)}</div></fieldset>}
           <div className="product-detail-availability">{selected?.sale_mode === 'stock' ? 'Ready stock' : 'Pre order'}{selected?.available !== null ? ` · ${selected?.available || 0} tersedia` : ' · Kuota terbuka'}</div>
           <div className="quantity-control"><span>Jumlah</span><div><button type="button" aria-label="Kurangi jumlah" onClick={() => setQuantity((value) => Math.max(1, value - 1))}><Minus size={15} /></button><strong>{quantity}</strong><button type="button" aria-label="Tambah jumlah" onClick={() => setQuantity((value) => Math.min(maxQuantity, value + 1))}><Plus size={15} /></button></div></div>
           <button className="commerce-primary storefront-add-button" type="button" disabled={unavailable} onClick={() => { if (!selected) return; onAdd({ product, variant: selected, quantity }); onClose(); }}>{unavailable ? 'Tidak tersedia' : 'Tambah ke keranjang'}</button>

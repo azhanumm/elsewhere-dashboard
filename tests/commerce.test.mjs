@@ -550,7 +550,9 @@ await test('fractional rupiah always rounds up to the next thousand', async () =
 await test('cart checkout creates one atomic order with every product and preserves legacy variants', async () => {
   await owner();
   await db.exec(await readFile(new URL('../supabase/migrations/202609150001_variant_options.sql', import.meta.url), 'utf8'));
+  await db.query("update product_variants set option1_value='', option2_value='' where id=$1", [variant]);
   await db.exec(await readFile(new URL('../supabase/migrations/202609240001_cart_checkout_and_legacy_variants.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../supabase/migrations/202609270001_normalize_variant_dimensions.sql', import.meta.url), 'utf8'));
   assert.equal((await db.query('select option1_value from product_variants where id=$1', [variant])).rows[0].option1_value, 'M');
   assert.equal((await db.query('select option1_label from products where id=$1', [product])).rows[0].option1_label, 'Pilihan');
 
