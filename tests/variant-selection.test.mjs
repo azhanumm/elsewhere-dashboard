@@ -56,6 +56,25 @@ await test('normalization preserves products with two real option dimensions', (
   assert.equal(normalized.option2_value, 'M');
 });
 
+await test('legacy default rows do not become a long option beside a two-dimensional matrix', () => {
+  const normalized = normalizeVariantOptions([
+    { id: 'default', name: 'Classic Tiramisu Almond White Chocolate Confectionery (300g)', option1_value: null, option2_value: null },
+    { id: 'matrix', name: '150g / Matcha White Chocolate', option1_value: '150g', option2_value: 'Matcha White Chocolate' },
+  ]);
+
+  assert.equal(normalized[0].option1_value, null);
+  assert.deepEqual(getOptionValues(normalized, 'option1_value'), ['150g']);
+});
+
+await test('inactive choices stay removed when the editor reloads after save', () => {
+  const rows = [
+    { id: 'removed', active: false, option1_value: 'BPOP Cola', option2_value: null },
+    { id: 'kept', active: true, option1_value: '65g', option2_value: null },
+  ];
+
+  assert.deepEqual(getOptionValues(rows, 'option1_value'), ['65g']);
+});
+
 await test('legacy combined names can be matched to a new two-dimension combination', () => {
   assert.equal(variantNameMatchesOptions('CaramelCrisp — Large Bag', 'Large Bag', 'Caramel Crisp'), true);
   assert.equal(variantNameMatchesOptions('Chicago Mix — Petite Tin', 'Petite Tin', 'Chicago Mix'), true);

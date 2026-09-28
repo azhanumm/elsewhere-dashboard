@@ -302,9 +302,12 @@ export function Dashboard() {
   const [deletingProduct, setDeletingProduct] = useState(false);
   const[variants,setVariants]=useState<Variant[]>([]);
   const[variantProduct,setVariantProduct]=useState<Product|null>(null);
+  const[editorDirty,setEditorDirty]=useState(false);
+  const[savingEditor,setSavingEditor]=useState(false);
+  const[openVariantGroups,setOpenVariantGroups]=useState<Set<string>>(()=>new Set());
+  const[deletedVariantIds,setDeletedVariantIds]=useState<Set<string>>(()=>new Set());
   const[option1ValuesText,setOption1ValuesText]=useState("");
   const[option2ValuesText,setOption2ValuesText]=useState("");
-  const[syncingVariants,setSyncingVariants]=useState(false);
   const[option1Assignments,setOption1Assignments]=useState<Record<string,{selected:string[];price:number;weight_grams:number;photo_url:string;sale_mode:"stock"|"preorder";preorder_capacity:number|null}>>({});
   const[variantDraft,setVariantDraft]=useState({name:'',sku:'',option1_value:'',option2_value:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:null as number|null});
   const [productDraft, setProductDraft] = useState({
@@ -524,7 +527,6 @@ export function Dashboard() {
         { event: "*", schema: "public", table: "products" },
         () => loadSharedData(activeTripCode),
       )
-      .on("postgres_changes",{event:"*",schema:"public",table:"product_variants"},()=>{if(variantProduct)openVariants(variantProduct)})
       .on("postgres_changes",{event:"*",schema:"public",table:"product_categories"},()=>loadSharedData(activeTripCode))
       .on(
         "postgres_changes",
@@ -709,17 +711,12 @@ export function Dashboard() {
     await loadSharedData(activeTripCode);
   };
   const saveProduct = async (
-    id: string,
-    key: keyof Product,
-    value: string | number | null,
+    _id: string,
+    _key: keyof Product,
+    _value: string | number | null,
   ) => {
-    setSyncStatus("Menyimpan produk…");
-    const dbKey = key === "price_thb" ? "local_price" : key;
-    const { error } = await supabase
-      .from("products")
-      .update({ [dbKey]: value })
-      .eq("id", id);
-    setSyncStatus(error ? "Gagal menyimpan produk" : "Produk tersimpan");
+    setEditorDirty(true);
+    setSyncStatus("Ada perubahan yang belum disimpan");
   };
   const updateProduct = (
     id: string,
@@ -737,7 +734,6 @@ export function Dashboard() {
     key: keyof Product,
     value: string | number | null,
   ) => {
-    updateProduct(id, key, value);
     setVariantProduct((product) =>
       product?.id === id
         ? ({
@@ -747,6 +743,8 @@ export function Dashboard() {
           } as Product)
         : product,
     );
+    setEditorDirty(true);
+    setSyncStatus("Ada perubahan yang belum disimpan");
   };
   const deleteProduct = async (id: string) => {
     setSyncStatus("Menghapus produk…");
@@ -836,9 +834,9 @@ export function Dashboard() {
     if (!deleted) return;
     const shouldCloseEditor = productDeleteConfirm.closeEditor;
     setProductDeleteConfirm(null);
-    if (shouldCloseEditor) closeProductEditor();
+    if (shouldCloseEditor) closeProductEditor(true);
   };
-  const uploadPhoto=async(product:Product,file:File)=>{setSyncStatus('Mengunggah foto…');const ext=file.name.split('.').pop()?.toLowerCase()||'jpg';const path=`${product.trip_code}/${product.id}-${Date.now()}.${ext}`;const{error}=await supabase.storage.from('product-images').upload(path,file,{upsert:false});if(error){setSyncStatus('Gagal mengunggah foto');return}const{data}=supabase.storage.from('product-images').getPublicUrl(path);await saveProduct(product.id,'photo_url',data.publicUrl);setCatalogue(rows=>rows.map(x=>x.id===product.id?{...x,photo_url:data.publicUrl}:x));setVariantProduct(x=>x?.id===product.id?{...x,photo_url:data.publicUrl}:x);setSyncStatus('Foto tersimpan')};
+  const uploadPhoto=async(product:Product,file:File)=>{setSyncStatus('Mengunggah foto…');const ext=file.name.split('.').pop()?.toLowerCase()||'jpg';const path=`${product.trip_code}/${product.id}-${Date.now()}.${ext}`;const{error}=await supabase.storage.from('product-images').upload(path,file,{upsert:false});if(error){setSyncStatus('Gagal mengunggah foto');return}const{data}=supabase.storage.from('product-images').getPublicUrl(path);setVariantProduct(x=>x?.id===product.id?{...x,photo_url:data.publicUrl}:x);setEditorDirty(true);setSyncStatus('Foto siap — klik Simpan untuk menerapkan')};
   const copyProductImage=async(product:Product)=>{
     if(!product.photo_url){setSyncStatus("Produk ini belum punya foto");return}
     setSyncStatus("Menyalin foto…");
@@ -861,18 +859,21 @@ export function Dashboard() {
       window.open(product.photo_url,"_blank","noopener,noreferrer");
     }
   };
-  const uploadVariantPhoto=async(variant:Variant,file:File)=>{if(!variantProduct)return;setSyncStatus('Mengunggah foto varian…');const ext=file.name.split('.').pop()?.toLowerCase()||'jpg';const path=`${variantProduct.trip_code}/${variantProduct.id}/variants/${variant.id}-${Date.now()}.${ext}`;const{error}=await supabase.storage.from('product-images').upload(path,file,{upsert:false});if(error){setSyncStatus('Gagal mengunggah foto varian');return}const{data}=supabase.storage.from('product-images').getPublicUrl(path);await saveVariant(variant.id,'photo_url',data.publicUrl);updateVariant(variant.id,'photo_url',data.publicUrl);setSyncStatus('Foto varian tersimpan')};
-  const togglePublish=async(product:Product)=>{setSyncStatus(product.published?'Menarik produk dari landing page…':'Menyetujui produk…');const next=!product.published;if(next && !(rate>0)){setSyncStatus("Tunggu kurs otomatis sebelum publikasi");return;}const{error}=await supabase.from('products').update({published:next,approved_at:next?new Date().toISOString():null,approved_by:next?user?.id:null,currency_code:currency,currency_symbol:currencySymbol,fashion_cargo_per_kg:cargoRate,nonfashion_cargo_per_kg:otherCargoRate,status:next?'Ready':product.status}).eq('id',product.id);setSyncStatus(error?'Gagal mengubah publikasi':next?'Produk tayang di landing page':'Produk disembunyikan');if(!error){setCatalogue(rows=>rows.map(x=>x.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x));setVariantProduct(x=>x?.id===product.id?{...x,published:next,status:next?'Ready':x.status}:x)}};
+  const uploadVariantPhoto=async(variant:Variant,file:File)=>{if(!variantProduct)return;setSyncStatus('Mengunggah foto varian…');const ext=file.name.split('.').pop()?.toLowerCase()||'jpg';const path=`${variantProduct.trip_code}/${variantProduct.id}/variants/${variant.id}-${Date.now()}.${ext}`;const{error}=await supabase.storage.from('product-images').upload(path,file,{upsert:false});if(error){setSyncStatus('Gagal mengunggah foto varian');return}const{data}=supabase.storage.from('product-images').getPublicUrl(path);updateVariant(variant.id,'photo_url',data.publicUrl);setSyncStatus('Foto varian siap — klik Simpan untuk menerapkan')};
+  const togglePublish=(product:Product)=>{const next=!product.published;if(next&&!(rate>0)){setSyncStatus("Tunggu kurs otomatis sebelum publikasi");return;}setVariantProduct(current=>current?.id===product.id?{...current,published:next,status:next?'Ready':current.status}:current);setEditorDirty(true);setSyncStatus(next?'Status tayang siap — klik Simpan':'Status disembunyikan siap — klik Simpan')};
   const hydrateVariantEditor=(rows:Variant[],product:Product)=>{
     const normalizedRows = normalizeVariantOptions(rows) as Variant[];
+    const activeRows = normalizedRows.filter((row)=>row.active!==false);
     setVariants(normalizedRows);
-    const option1List = getOptionValues(normalizedRows, 'option1_value') as string[];
-    const option2List = getOptionValues(normalizedRows, 'option2_value') as string[];
+    const option1List = getOptionValues(activeRows, 'option1_value') as string[];
+    const option2List = getOptionValues(activeRows, 'option2_value') as string[];
     setOption1ValuesText(option1List.join(', '));
     setOption2ValuesText(option2List.join(', '));
+    setOpenVariantGroups(new Set([option1List[0] ?? '']));
+    setDeletedVariantIds(new Set());
     const nextAssignments: Record<string,{selected:string[];price:number;weight_grams:number;photo_url:string;sale_mode:"stock"|"preorder";preorder_capacity:number|null}> = {};
     for (const option1 of option1List) {
-      const matchingRows = normalizedRows.filter((row) => row.option1_value === option1);
+      const matchingRows = activeRows.filter((row) => row.option1_value === option1);
       const base = matchingRows[0];
       nextAssignments[option1] = {
         selected: cleanOptionValues(matchingRows.map((row) => row.option2_value).filter(Boolean)) as string[],
@@ -884,6 +885,7 @@ export function Dashboard() {
       };
     }
     setOption1Assignments(nextAssignments);
+    setEditorDirty(false);
   };
   const openVariants=async(product:Product)=>{setVariantProduct(product);const{data}=await supabase.from('product_variants').select('*').eq('product_id',product.id).order('created_at');hydrateVariantEditor((data||[]) as Variant[],product)};
   const openProductEditor=async(product:Product)=>{
@@ -894,8 +896,10 @@ export function Dashboard() {
     window.history.pushState({},"",`/dashboard/products/${product.id}`);
     window.scrollTo({top:0,behavior:"auto"});
   };
-  const closeProductEditor=()=>{
+  const closeProductEditor=(force=false)=>{
+    if(!force&&editorDirty&&!window.confirm('Ada perubahan yang belum disimpan. Keluar dan buang perubahan?'))return;
     setVariantProduct(null);
+    setEditorDirty(false);
     setView("catalogue");
     window.history.pushState({},"","/dashboard");
     requestAnimationFrame(() => {
@@ -910,10 +914,12 @@ export function Dashboard() {
   };
   const variantDisplayName=(variant:Pick<Variant,'name'|'option1_value'|'option2_value'>) => [variant.option1_value,variant.option2_value].filter(Boolean).join(' / ') || variant.name;
   const parseOptionList=(text:string)=>cleanOptionValues(text.split(/\n|,/).map((value)=>value.trim()).filter(Boolean)) as string[];
+  const markEditorDirty=()=>{setEditorDirty(true);setSyncStatus('Ada perubahan yang belum disimpan')};
   const getOption1Default=(option1:string)=>{
-    const base = variants.find((row) => row.option1_value === option1) || variants[0];
+    const activeVariants = variants.filter((row)=>row.active!==false);
+    const base = activeVariants.find((row) => row.option1_value === option1) || activeVariants[0];
     return {
-      selected: variants.filter((row) => row.option1_value === option1 && row.option2_value).map((row) => row.option2_value as string),
+      selected: activeVariants.filter((row) => row.option1_value === option1 && row.option2_value).map((row) => row.option2_value as string),
       price: Number(base?.local_price ?? variantProduct?.local_price ?? 0),
       weight_grams: Number(base?.weight_grams ?? variantProduct?.weight_grams ?? 0),
       photo_url: base?.photo_url ?? variantProduct?.photo_url ?? '',
@@ -921,14 +927,10 @@ export function Dashboard() {
       preorder_capacity: base?.preorder_capacity ?? null,
     };
   };
-  const syncVariantMatrix=async()=>{
-    if (!variantProduct || !user || syncingVariants) return;
+  const saveProductEditor=async()=>{
+    if (!variantProduct || !user || savingEditor) return;
     const option1Values = parseOptionList(option1ValuesText);
     const option2Values = parseOptionList(option2ValuesText);
-    if (!option1Values.length && !option2Values.length) {
-      setSyncStatus('Isi minimal satu daftar pilihan sebelum menyimpan');
-      return;
-    }
     const desired = new Map<string,{ option1_value:string; option2_value:string }>();
     if (option1Values.length) {
       for (const option1 of option1Values) {
@@ -945,19 +947,50 @@ export function Dashboard() {
     } else {
       for (const option2 of option2Values) desired.set(`::${option2}`, { option1_value: '', option2_value: option2 });
     }
-    if (!desired.size) {
+    if ((option1Values.length || option2Values.length) && !desired.size) {
       setSyncStatus('Pilih minimal satu kombinasi sebelum menyimpan');
       return;
     }
 
-    setSyncingVariants(true);
-    setSyncStatus('Menyimpan kombinasi pilihan…');
+    setSavingEditor(true);
+    setSyncStatus('Menyimpan semua perubahan…');
     try {
+      const { error: productError } = await supabase.from('products').update({
+        name: variantProduct.name.trim(),
+        brand: variantProduct.brand,
+        source_url: variantProduct.source_url,
+        store_location: variantProduct.store_location,
+        category: variantProduct.category,
+        product_type: variantProduct.product_type,
+        color: variantProduct.color,
+        size: variantProduct.size,
+        material: variantProduct.material,
+        price_thb: Number(variantProduct.local_price ?? variantProduct.price_thb ?? 0),
+        local_price: Number(variantProduct.local_price ?? variantProduct.price_thb ?? 0),
+        weight_grams: Number(variantProduct.weight_grams || 0),
+        option1_label: variantProduct.option1_label?.trim() || null,
+        option2_label: variantProduct.option2_label?.trim() || null,
+        margin_percent: variantProduct.margin_percent,
+        photo_url: variantProduct.photo_url,
+        notes: variantProduct.notes,
+        status: variantProduct.status,
+        published: variantProduct.published,
+        approved_at: variantProduct.published ? new Date().toISOString() : null,
+        approved_by: variantProduct.published ? user.id : null,
+        currency_code: currency,
+        currency_symbol: currencySymbol,
+        fashion_cargo_per_kg: cargoRate,
+        nonfashion_cargo_per_kg: otherCargoRate,
+        updated_at: new Date().toISOString(),
+      }).eq('id',variantProduct.id);
+      if (productError) throw new Error('Gagal menyimpan detail produk');
+
       const claimedIds = new Set<string>();
-      for (const [key, combo] of desired.entries()) {
-        const exact = variants.find((row) => !claimedIds.has(row.id) && `${row.option1_value || ''}::${row.option2_value || ''}` === key);
-        const legacy = variants.find((row) => !claimedIds.has(row.id) && variantNameMatchesOptions(row.name, combo.option1_value, combo.option2_value));
-        const existing = exact ?? legacy;
+      const rowsToSave = desired.size ? [...desired.entries()] : variants.map((row)=>[row.id,{option1_value:row.option1_value||'',option2_value:row.option2_value||''}] as const);
+      for (const [key, combo] of rowsToSave) {
+        const exact = variants.find((row) => !claimedIds.has(row.id) && !deletedVariantIds.has(row.id) && `${row.option1_value || ''}::${row.option2_value || ''}` === `${combo.option1_value}::${combo.option2_value}`);
+        const legacy = desired.size ? variants.find((row) => !claimedIds.has(row.id) && !deletedVariantIds.has(row.id) && variantNameMatchesOptions(row.name, combo.option1_value, combo.option2_value)) : undefined;
+        const existing = exact ?? legacy ?? (!desired.size ? variants.find((row)=>row.id===key&&!deletedVariantIds.has(row.id)) : undefined);
         const assignment = combo.option1_value ? (option1Assignments[combo.option1_value] ?? getOption1Default(combo.option1_value)) : getOption1Default('');
         const details = variantDetailsForSync(existing, {
           local_price: Number(assignment.price ?? variantProduct.local_price ?? 0),
@@ -966,50 +999,41 @@ export function Dashboard() {
           sale_mode: assignment.sale_mode ?? 'preorder',
           preorder_capacity: assignment.preorder_capacity ?? null,
         });
-        const nextName = [combo.option1_value, combo.option2_value].filter(Boolean).join(' / ');
-        const payload = {
-          option1_value: combo.option1_value || null,
-          option2_value: combo.option2_value || null,
-          name: nextName,
-          ...details,
-          ...(existing ? { sku: existing.sku } : {}),
-          active: true,
-          updated_at: new Date().toISOString(),
-        };
-        if (existing) {
+        const nextName = [combo.option1_value, combo.option2_value].filter(Boolean).join(' / ') || existing?.name || 'Default';
+        const payload = {option1_value:combo.option1_value||null,option2_value:combo.option2_value||null,name:nextName,...details,sku:existing?.sku||`${variantProduct.product_code}-${combo.option1_value}-${combo.option2_value}`.replace(/\s+/g,'').slice(0,40),active:existing?.active??true,updated_at:new Date().toISOString()};
+        if (existing && !existing.id.startsWith('draft-')) {
           claimedIds.add(existing.id);
-          const { error } = await supabase.from('product_variants').update(payload).eq('id', existing.id);
-          if (error) throw new Error('Gagal memperbarui varian otomatis');
-          continue;
+          const { error } = await supabase.from('product_variants').update(payload).eq('id',existing.id);
+          if (error) throw new Error('Gagal memperbarui detail varian');
+        } else {
+          const { error } = await supabase.from('product_variants').insert({...payload,product_id:variantProduct.id,stock:0,created_by:user.id});
+          if (error) throw new Error('Gagal membuat varian baru');
+          if(existing)claimedIds.add(existing.id);
         }
-        const { data, error } = await supabase.from('product_variants').insert({
-          ...payload,
-          product_id: variantProduct.id,
-          sku: `${variantProduct.product_code}-${combo.option1_value}-${combo.option2_value}`.replace(/\s+/g, '').slice(0, 40),
-          stock: 0,
-          created_by: user.id,
-        }).select('id').single();
-        if (error) throw new Error('Gagal membuat varian otomatis');
-        if (data?.id) claimedIds.add(data.id);
       }
-      const leftovers = variants.filter((row) => !claimedIds.has(row.id) && row.active).map((row) => row.id);
+      const leftovers = desired.size ? variants.filter((row) => !row.id.startsWith('draft-') && !claimedIds.has(row.id) && !deletedVariantIds.has(row.id) && row.active).map((row) => row.id) : [];
       if (leftovers.length) {
         const { error } = await supabase.from('product_variants').update({ active: false, updated_at: new Date().toISOString() }).in('id', leftovers);
         if (error) throw new Error('Gagal menonaktifkan varian lama');
       }
-      setSyncStatus('Kombinasi tersimpan dan landing page sudah diperbarui');
+      const idsToDelete=[...deletedVariantIds].filter((id)=>!id.startsWith('draft-'));
+      if(idsToDelete.length){const{error}=await supabase.from('product_variants').delete().in('id',idsToDelete);if(error)throw new Error('Gagal menghapus varian')}
+      updateProduct(variantProduct.id,'name',variantProduct.name);
+      setCatalogue(rows=>rows.map(row=>row.id===variantProduct.id?{...row,...variantProduct}:row));
+      setEditorDirty(false);
+      setSyncStatus('Semua perubahan tersimpan');
       await openVariants(variantProduct);
     } catch (error) {
-      setSyncStatus(error instanceof Error ? error.message : 'Gagal menyimpan kombinasi pilihan');
+      setSyncStatus(error instanceof Error ? error.message : 'Gagal menyimpan perubahan');
     } finally {
-      setSyncingVariants(false);
+      setSavingEditor(false);
     }
   };
-  const addVariant=async()=>{if(!variantProduct||!user||!variantDraft.name.trim())return;const option1Value=variantDraft.option1_value.trim();const option2Value=variantDraft.option2_value.trim();const payload={...variantDraft,option1_value:option1Value||null,option2_value:option2Value||null,name:variantDisplayName({...variantDraft,option1_value:option1Value,option2_value:option2Value}),product_id:variantProduct.id,created_by:user.id};const{error}=await supabase.from('product_variants').insert(payload);if(!error){setVariantDraft({name:'',sku:'',option1_value:'',option2_value:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:null as number|null});await openVariants(variantProduct)}};
-  const saveVariant=async(id:string,key:keyof Variant,value:string|number|boolean|null)=>{const {error}=await supabase.from('product_variants').update({[key]:value,updated_at:new Date().toISOString()}).eq('id',id);setSyncStatus(error ? "Varian gagal disimpan" : "Varian tersimpan"); if(error && variantProduct) await openVariants(variantProduct);};
-  const updateVariant=(id:string,key:keyof Variant,value:string|number|boolean|null)=>setVariants(rows=>rows.map(x=>x.id===id?{...x,[key]:value,...((key==='option1_value'||key==='option2_value')?{name:variantDisplayName({...x,[key]:value})}: {})}:x));
-  const saveVariantOption=(variant:Variant,key:'option1_value'|'option2_value',value:string)=>{const next={...variant,[key]:value};updateVariant(variant.id,key,value);saveVariant(variant.id,key,value);saveVariant(variant.id,'name',variantDisplayName(next));};
-  const deleteVariant=async(id:string)=>{await supabase.from('product_variants').delete().eq('id',id);if(variantProduct)await openVariants(variantProduct)};
+  const addVariant=()=>{if(!variantProduct||!variantDraft.name.trim())return;const option1Value=variantDraft.option1_value.trim();const option2Value=variantDraft.option2_value.trim();const row={...variantDraft,id:`draft-${crypto.randomUUID()}`,product_id:variantProduct.id,option1_value:option1Value||null,option2_value:option2Value||null,name:variantDisplayName({...variantDraft,option1_value:option1Value,option2_value:option2Value}),photo_url:null} as Variant;setVariants(current=>[...current,row]);if(option1Value)setOption1ValuesText(current=>cleanOptionValues([...parseOptionList(current),option1Value]).join(', '));if(option2Value)setOption2ValuesText(current=>cleanOptionValues([...parseOptionList(current),option2Value]).join(', '));setVariantDraft({name:'',sku:'',option1_value:'',option2_value:'',local_price:0,weight_grams:0,stock:0,active:true,sale_mode:'preorder' as const,preorder_capacity:null as number|null});setEditorDirty(true);setSyncStatus('Varian baru siap — klik Simpan')};
+  const saveVariant=async(_id:string,_key:keyof Variant,_value:string|number|boolean|null)=>{setEditorDirty(true);setSyncStatus('Ada perubahan yang belum disimpan')};
+  const updateVariant=(id:string,key:keyof Variant,value:string|number|boolean|null)=>{setVariants(rows=>rows.map(x=>x.id===id?{...x,[key]:value,...((key==='option1_value'||key==='option2_value')?{name:variantDisplayName({...x,[key]:value})}: {})}:x));setEditorDirty(true);setSyncStatus('Ada perubahan yang belum disimpan')};
+  const saveVariantOption=(variant:Variant,key:'option1_value'|'option2_value',value:string)=>{updateVariant(variant.id,key,value)};
+  const deleteVariant=(id:string)=>{setVariants(rows=>rows.filter(row=>row.id!==id));setDeletedVariantIds(current=>new Set(current).add(id));setEditorDirty(true);setSyncStatus('Varian akan dihapus setelah klik Simpan')};
   const addCategory=async()=>{
     const name=categoryDraft.trim();
     if(!name||!user)return;
@@ -1781,7 +1805,7 @@ export function Dashboard() {
         ) : view === "product" && variantProduct ? (
           <section className="product-editor-page">
             <div className="product-editor-topbar">
-              <button onClick={closeProductEditor}><ArrowLeft size={16}/> Kembali ke katalog</button>
+              <button onClick={()=>closeProductEditor()}><ArrowLeft size={16}/> Kembali ke katalog</button>
               <small>{syncStatus}</small>
               <button className={`publish-toggle ${variantProduct.published ? "live" : ""}`} onClick={()=>togglePublish(variantProduct)}>
                 {variantProduct.published ? "Sudah tayang ✓" : "Approve & tayang"}
@@ -1803,7 +1827,7 @@ export function Dashboard() {
               </aside>
               <div className="product-editor-main">
                 <article className="panel editor-section">
-                  <div className="editor-section-title"><div><span>INFORMASI UTAMA</span><h2>Data produk</h2></div><small>Tersimpan otomatis saat pindah kolom</small></div>
+                  <div className="editor-section-title"><div><span>INFORMASI UTAMA</span><h2>Data produk</h2></div><small>Perubahan diterapkan setelah klik Simpan</small></div>
                   <div className="editor-form-grid">
                     <label className="wide">Nama produk<input value={variantProduct.name} onChange={e=>updateEditorProduct(variantProduct.id,"name",e.target.value)} onBlur={e=>saveProduct(variantProduct.id,"name",e.target.value)}/></label>
                     <label>Brand<input value={variantProduct.brand} onChange={e=>updateEditorProduct(variantProduct.id,"brand",e.target.value)} onBlur={e=>saveProduct(variantProduct.id,"brand",e.target.value)}/></label>
@@ -1836,30 +1860,33 @@ export function Dashboard() {
                     <label>Pilihan 2 (contoh: Ukuran)<input value={variantProduct.option2_label || ""} placeholder="Ukuran" onChange={e=>updateEditorProduct(variantProduct.id,"option2_label",e.target.value)} onBlur={e=>saveProduct(variantProduct.id,"option2_label",e.target.value.trim() || null)}/></label>
                   </div>
                   <div className="variant-option-settings">
-                    <label>{variantProduct.option1_label || "Pilihan 1"} tersedia<input value={option1ValuesText} onChange={e=>setOption1ValuesText(e.target.value)} placeholder="Violeta, Serenata" /><small>Pisahkan setiap pilihan dengan koma.</small></label>
-                    <label>{variantProduct.option2_label || "Pilihan 2"} tersedia<input value={option2ValuesText} onChange={e=>setOption2ValuesText(e.target.value)} placeholder="XXS, XS, S, XL" /><small>Pisahkan setiap pilihan dengan koma.</small></label>
+                    <label>{variantProduct.option1_label || "Pilihan 1"} tersedia<input value={option1ValuesText} onChange={e=>{setOption1ValuesText(e.target.value);markEditorDirty()}} placeholder="Violeta, Serenata" /><small>Pisahkan setiap pilihan dengan koma.</small></label>
+                    <label>{variantProduct.option2_label || "Pilihan 2"} tersedia<input value={option2ValuesText} onChange={e=>{setOption2ValuesText(e.target.value);markEditorDirty()}} placeholder="XXS, XS, S, XL" /><small>Pisahkan setiap pilihan dengan koma.</small></label>
                   </div>
                   <div className="variant-matrix-save">
-                    <div><strong>Simpan perubahan kategori pilihan</strong><small>Daftar dan centang kombinasi baru tampil di landing page setelah disimpan.</small></div>
-                    <button className="primary-inline" type="button" disabled={syncingVariants || (!parseOptionList(option1ValuesText).length && !parseOptionList(option2ValuesText).length)} onClick={()=>void syncVariantMatrix()}>{syncingVariants ? 'Menyimpan…' : 'Simpan kombinasi pilihan'}</button>
+                    <div><strong>Semua perubahan disimpan bersama</strong><small>Edit kategori, kombinasi, foto, dan detail varian lalu gunakan tombol Simpan yang selalu terlihat.</small></div>
                   </div>
                   <div className="variant-matrix-editor">
-                    {parseOptionList(option1ValuesText).map((option1) => {
+                    {(parseOptionList(option1ValuesText).length ? parseOptionList(option1ValuesText) : ['']).map((option1) => {
                       const assignment = option1Assignments[option1] ?? { selected: parseOptionList(option2ValuesText), price: Number(variantProduct.local_price || 0), weight_grams: Number(variantProduct.weight_grams || 0), photo_url: variantProduct.photo_url || '', sale_mode: 'preorder' as const, preorder_capacity: null };
-                      const option1Variants = variants.filter((row) => row.option1_value === option1);
-                      return <div className="variant-matrix-card" key={option1}>
+                      const option1Variants = variants.filter((row) => row.active!==false && (option1 ? row.option1_value === option1 : !row.option1_value));
+                      const groupOpen = openVariantGroups.has(option1);
+                      const groupTitle = option1 || (parseOptionList(option2ValuesText).length ? (variantProduct.option2_label || 'Pilihan') : 'Varian default');
+                      return <div className="variant-matrix-card" key={option1 || '__default'}>
                         <div className="variant-matrix-header">
-                          <strong>{option1}</strong>
+                          <button type="button" aria-expanded={groupOpen} onClick={()=>setOpenVariantGroups(current=>{const next=new Set(current);if(next.has(option1))next.delete(option1);else next.add(option1);return next})}>{groupOpen?<ChevronDown size={17}/>:<ChevronRight size={17}/>}<span><strong>{groupTitle}</strong><small>{option1Variants.length} kombinasi</small></span></button>
                         </div>
-                        <div className="variant-matrix-checklist">{parseOptionList(option2ValuesText).map((option2) => <label key={`${option1}-${option2}`}><input type="checkbox" checked={assignment.selected.includes(option2)} onChange={(event) => {
+                        {groupOpen&&<>
+                        {option1&&<div className="variant-matrix-checklist">{parseOptionList(option2ValuesText).map((option2) => <label key={`${option1}-${option2}`}><input type="checkbox" checked={assignment.selected.includes(option2)} onChange={(event) => {
                               const nextSelected = event.target.checked ? [...new Set([...assignment.selected, option2])] : assignment.selected.filter((value) => value !== option2);
                               setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, selected: nextSelected } }));
-                            }} />{option2}</label>)}</div>
+                              markEditorDirty();
+                            }} />{option2}</label>)}</div>}
                         <div className="variant-matrix-fields">
-                          <label>Harga default varian baru {currency}<input type="number" value={assignment.price || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, price: Number(event.target.value || 0) } }))} /></label>
-                          <label>Berat default varian baru (gram)<input type="number" value={assignment.weight_grams || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, weight_grams: Number(event.target.value || 0) } }))} /></label>
-                          <label>Foto default varian baru<input type="url" value={assignment.photo_url || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, photo_url: event.target.value } }))} placeholder="https://…" /></label>
-                          <label>Penjualan default varian baru<select value={assignment.sale_mode} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, sale_mode: event.target.value as 'stock' | 'preorder' } }))}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label>
+                          <label>Harga default varian baru {currency}<input type="number" value={assignment.price || ""} onChange={(event) => {setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, price: Number(event.target.value || 0) } }));markEditorDirty()}} /></label>
+                          <label>Berat default varian baru (gram)<input type="number" value={assignment.weight_grams || ""} onChange={(event) => {setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, weight_grams: Number(event.target.value || 0) } }));markEditorDirty()}} /></label>
+                          <label>Foto default varian baru<input type="url" value={assignment.photo_url || ""} onChange={(event) => {setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, photo_url: event.target.value } }));markEditorDirty()}} placeholder="https://…" /></label>
+                          <label>Penjualan default varian baru<select value={assignment.sale_mode} onChange={(event) => {setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, sale_mode: event.target.value as 'stock' | 'preorder' } }));markEditorDirty()}}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label>
                         </div>
                         {option1Variants.length > 0 ? (
                           <div className="variant-matrix-rows">
@@ -1882,6 +1909,7 @@ export function Dashboard() {
                             ))}
                           </div>
                         ) : <div className="variant-empty-state">Belum ada kombinasi untuk {option1}</div>}
+                        </>}
                       </div>;
                     })}
                   </div>
@@ -1896,6 +1924,7 @@ export function Dashboard() {
                 <div className="editor-danger-zone"><button onClick={()=>setProductDeleteConfirm({product:variantProduct,step:1,closeEditor:true})}><Trash2 size={14}/> Hapus produk</button></div>
               </div>
             </div>
+            <div className={`product-save-bar ${editorDirty?'dirty':''}`}><div><strong>{editorDirty?'Ada perubahan belum disimpan':'Semua perubahan sudah tersimpan'}</strong><small>Nama, foto, pilihan, dan seluruh detail varian disimpan sekaligus.</small></div><button type="button" disabled={!editorDirty||savingEditor} onClick={()=>void saveProductEditor()}>{savingEditor?'Menyimpan…':'Simpan'}</button></div>
           </section>
         ) : view === "catalogue" ? (
           <section className="catalogue-workspace">
