@@ -15,7 +15,6 @@ import {
   MapPinned,
   Menu,
   PackageSearch,
-  Pencil,
   Plane,
   Plus,
   RefreshCw,
@@ -38,7 +37,7 @@ import OrdersPanel from "../components/orders-panel";
 import { calculatePrice, defaultMargin, isFashion } from "../lib/pricing";
 import { type Order, paidAmount } from "../lib/commerce";
 import { supabaseConfigured } from "../lib/supabase";
-import { normalizeVariantOptions, variantNameMatchesOptions } from "../lib/variant-selection.js";
+import { cleanOptionValues, getOptionValues, normalizeVariantOptions, variantDetailsForSync, variantNameMatchesOptions } from "../lib/variant-selection.js";
 const stages = [
   ["Leads", 48, "#dac1c7"],
   ["Waitlist", 36, "#c98e9b"],
@@ -298,6 +297,9 @@ export function Dashboard() {
   const [manageCategories,setManageCategories]=useState(false);
   const [openCategories,setOpenCategories]=useState<Set<string>>(()=>new Set(["Pakaian"]));
   const [productModal, setProductModal] = useState(false);
+  const [duplicatingProductId, setDuplicatingProductId] = useState<string | null>(null);
+  const [productDeleteConfirm, setProductDeleteConfirm] = useState<{product:Product;step:1|2;closeEditor:boolean}|null>(null);
+  const [deletingProduct, setDeletingProduct] = useState(false);
   const[variants,setVariants]=useState<Variant[]>([]);
   const[variantProduct,setVariantProduct]=useState<Product|null>(null);
   const[option1ValuesText,setOption1ValuesText]=useState("");
@@ -751,6 +753,90 @@ export function Dashboard() {
     const { error } = await supabase.from("products").delete().eq("id", id);
     setSyncStatus(error ? "Gagal menghapus produk" : "Produk terhapus");
     if (!error) await loadSharedData();
+    return !error;
+  };
+  const duplicateProduct = async (product: Product) => {
+    if (!user || duplicatingProductId) return;
+    setDuplicatingProductId(product.id);
+    setSyncStatus("Menduplikat produk…");
+    const { data: sourceVariants, error: variantsReadError } = await supabase
+      .from("product_variants")
+      .select("name,option1_value,option2_value,local_price,weight_grams,photo_url,stock,active,sale_mode,preorder_capacity")
+      .eq("product_id", product.id)
+      .order("created_at");
+    if (variantsReadError) {
+      setSyncStatus("Gagal membaca varian produk");
+      setDuplicatingProductId(null);
+      return;
+    }
+    const newProductCode = `${product.trip_code}-${nextProductCode()}`;
+    const { data: duplicated, error: productError } = await supabase
+      .from("products")
+      .insert({
+        product_code: newProductCode,
+        name: `${product.name} (Duplikat)`,
+        brand: product.brand,
+        source_url: product.source_url,
+        store_location: product.store_location,
+        category: product.category,
+        product_type: product.product_type,
+        color: product.color,
+        size: product.size,
+        material: product.material,
+        price_thb: Number(product.local_price ?? product.price_thb ?? 0),
+        local_price: Number(product.local_price ?? product.price_thb ?? 0),
+        weight_grams: Number(product.weight_grams || 0),
+        option1_label: product.option1_label || null,
+        option2_label: product.option2_label || null,
+        margin_percent: product.margin_percent,
+        photo_url: product.photo_url,
+        notes: product.notes,
+        status: "Draft",
+        published: false,
+        trip_code: product.trip_code,
+        created_by: user.id,
+        currency_code: product.currency_code,
+        currency_symbol: product.currency_symbol,
+        fashion_cargo_per_kg: product.fashion_cargo_per_kg,
+        nonfashion_cargo_per_kg: product.nonfashion_cargo_per_kg,
+      })
+      .select("*")
+      .single();
+    if (productError || !duplicated) {
+      setSyncStatus("Gagal menduplikat produk");
+      setDuplicatingProductId(null);
+      return;
+    }
+    if (sourceVariants?.length) {
+      const variantCopies = sourceVariants.map((variant, index) => ({
+        ...variant,
+        product_id: duplicated.id,
+        sku: `${newProductCode}-${index + 1}`,
+        stock: 0,
+        created_by: user.id,
+      }));
+      const { error: variantInsertError } = await supabase.from("product_variants").insert(variantCopies);
+      if (variantInsertError) {
+        await supabase.from("products").delete().eq("id", duplicated.id);
+        setSyncStatus("Gagal menduplikat varian; salinan dibatalkan");
+        setDuplicatingProductId(null);
+        return;
+      }
+    }
+    await loadSharedData(product.trip_code);
+    setDuplicatingProductId(null);
+    setSyncStatus("Produk berhasil diduplikat sebagai draft");
+    await openProductEditor(duplicated as Product);
+  };
+  const confirmDeleteProduct = async () => {
+    if (!productDeleteConfirm || deletingProduct) return;
+    setDeletingProduct(true);
+    const deleted = await deleteProduct(productDeleteConfirm.product.id);
+    setDeletingProduct(false);
+    if (!deleted) return;
+    const shouldCloseEditor = productDeleteConfirm.closeEditor;
+    setProductDeleteConfirm(null);
+    if (shouldCloseEditor) closeProductEditor();
   };
   const uploadPhoto=async(product:Product,file:File)=>{setSyncStatus('Mengunggah foto…');const ext=file.name.split('.').pop()?.toLowerCase()||'jpg';const path=`${product.trip_code}/${product.id}-${Date.now()}.${ext}`;const{error}=await supabase.storage.from('product-images').upload(path,file,{upsert:false});if(error){setSyncStatus('Gagal mengunggah foto');return}const{data}=supabase.storage.from('product-images').getPublicUrl(path);await saveProduct(product.id,'photo_url',data.publicUrl);setCatalogue(rows=>rows.map(x=>x.id===product.id?{...x,photo_url:data.publicUrl}:x));setVariantProduct(x=>x?.id===product.id?{...x,photo_url:data.publicUrl}:x);setSyncStatus('Foto tersimpan')};
   const copyProductImage=async(product:Product)=>{
@@ -780,16 +866,16 @@ export function Dashboard() {
   const hydrateVariantEditor=(rows:Variant[],product:Product)=>{
     const normalizedRows = normalizeVariantOptions(rows) as Variant[];
     setVariants(normalizedRows);
-    const option1List = Array.from(new Set(normalizedRows.map((row) => row.option1_value).filter(Boolean))) as string[];
-    const option2List = Array.from(new Set(normalizedRows.map((row) => row.option2_value).filter(Boolean))) as string[];
-    setOption1ValuesText(option1List.join('\n'));
-    setOption2ValuesText(option2List.join('\n'));
+    const option1List = getOptionValues(normalizedRows, 'option1_value') as string[];
+    const option2List = getOptionValues(normalizedRows, 'option2_value') as string[];
+    setOption1ValuesText(option1List.join(', '));
+    setOption2ValuesText(option2List.join(', '));
     const nextAssignments: Record<string,{selected:string[];price:number;weight_grams:number;photo_url:string;sale_mode:"stock"|"preorder";preorder_capacity:number|null}> = {};
     for (const option1 of option1List) {
       const matchingRows = normalizedRows.filter((row) => row.option1_value === option1);
       const base = matchingRows[0];
       nextAssignments[option1] = {
-        selected: matchingRows.map((row) => row.option2_value).filter(Boolean) as string[],
+        selected: cleanOptionValues(matchingRows.map((row) => row.option2_value).filter(Boolean)) as string[],
         price: Number(base?.local_price ?? product.local_price ?? 0),
         weight_grams: Number(base?.weight_grams ?? product.weight_grams ?? 0),
         photo_url: base?.photo_url ?? product.photo_url ?? '',
@@ -823,7 +909,7 @@ export function Dashboard() {
     restoreCataloguePosition();
   };
   const variantDisplayName=(variant:Pick<Variant,'name'|'option1_value'|'option2_value'>) => [variant.option1_value,variant.option2_value].filter(Boolean).join(' / ') || variant.name;
-  const parseOptionList=(text:string)=>Array.from(new Set(text.split(/\n|,/).map((value)=>value.trim()).filter(Boolean)));
+  const parseOptionList=(text:string)=>cleanOptionValues(text.split(/\n|,/).map((value)=>value.trim()).filter(Boolean)) as string[];
   const getOption1Default=(option1:string)=>{
     const base = variants.find((row) => row.option1_value === option1) || variants[0];
     return {
@@ -873,28 +959,25 @@ export function Dashboard() {
         const legacy = variants.find((row) => !claimedIds.has(row.id) && variantNameMatchesOptions(row.name, combo.option1_value, combo.option2_value));
         const existing = exact ?? legacy;
         const assignment = combo.option1_value ? (option1Assignments[combo.option1_value] ?? getOption1Default(combo.option1_value)) : getOption1Default('');
-        const commonPrice = Number(assignment.price ?? variantProduct.local_price ?? 0);
-        const commonWeight = Number(assignment.weight_grams ?? variantProduct.weight_grams ?? 0);
-        const commonPhoto = assignment.photo_url || variantProduct.photo_url || '';
-        const commonSaleMode = assignment.sale_mode ?? 'preorder';
-        const commonCapacity = assignment.preorder_capacity ?? null;
+        const details = variantDetailsForSync(existing, {
+          local_price: Number(assignment.price ?? variantProduct.local_price ?? 0),
+          weight_grams: Number(assignment.weight_grams ?? variantProduct.weight_grams ?? 0),
+          photo_url: assignment.photo_url || variantProduct.photo_url || '',
+          sale_mode: assignment.sale_mode ?? 'preorder',
+          preorder_capacity: assignment.preorder_capacity ?? null,
+        });
         const nextName = [combo.option1_value, combo.option2_value].filter(Boolean).join(' / ');
         const payload = {
           option1_value: combo.option1_value || null,
           option2_value: combo.option2_value || null,
           name: nextName,
-          local_price: commonPrice,
-          weight_grams: commonWeight,
-          photo_url: commonPhoto,
-          sale_mode: commonSaleMode,
-          preorder_capacity: commonCapacity,
+          ...details,
+          ...(existing ? { sku: existing.sku } : {}),
           active: true,
           updated_at: new Date().toISOString(),
         };
         if (existing) {
           claimedIds.add(existing.id);
-          const changed = existing.option1_value !== payload.option1_value || existing.option2_value !== payload.option2_value || existing.name !== nextName || existing.local_price !== commonPrice || existing.weight_grams !== commonWeight || (existing.photo_url || '') !== commonPhoto || existing.sale_mode !== commonSaleMode || (existing.preorder_capacity ?? null) !== commonCapacity || !existing.active;
-          if (!changed) continue;
           const { error } = await supabase.from('product_variants').update(payload).eq('id', existing.id);
           if (error) throw new Error('Gagal memperbarui varian otomatis');
           continue;
@@ -1753,8 +1836,8 @@ export function Dashboard() {
                     <label>Pilihan 2 (contoh: Ukuran)<input value={variantProduct.option2_label || ""} placeholder="Ukuran" onChange={e=>updateEditorProduct(variantProduct.id,"option2_label",e.target.value)} onBlur={e=>saveProduct(variantProduct.id,"option2_label",e.target.value.trim() || null)}/></label>
                   </div>
                   <div className="variant-option-settings">
-                    <label>{variantProduct.option1_label || "Pilihan 1"} tersedia<input value={option1ValuesText} onChange={e=>setOption1ValuesText(e.target.value)} placeholder="Violeta\nSerenata" /></label>
-                    <label>{variantProduct.option2_label || "Pilihan 2"} tersedia<input value={option2ValuesText} onChange={e=>setOption2ValuesText(e.target.value)} placeholder="XXS\nXS\nS\nXL" /></label>
+                    <label>{variantProduct.option1_label || "Pilihan 1"} tersedia<input value={option1ValuesText} onChange={e=>setOption1ValuesText(e.target.value)} placeholder="Violeta, Serenata" /><small>Pisahkan setiap pilihan dengan koma.</small></label>
+                    <label>{variantProduct.option2_label || "Pilihan 2"} tersedia<input value={option2ValuesText} onChange={e=>setOption2ValuesText(e.target.value)} placeholder="XXS, XS, S, XL" /><small>Pisahkan setiap pilihan dengan koma.</small></label>
                   </div>
                   <div className="variant-matrix-save">
                     <div><strong>Simpan perubahan kategori pilihan</strong><small>Daftar dan centang kombinasi baru tampil di landing page setelah disimpan.</small></div>
@@ -1773,10 +1856,10 @@ export function Dashboard() {
                               setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, selected: nextSelected } }));
                             }} />{option2}</label>)}</div>
                         <div className="variant-matrix-fields">
-                          <label>Harga {currency}<input type="number" value={assignment.price || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, price: Number(event.target.value || 0) } }))} /></label>
-                          <label>Berat (gram)<input type="number" value={assignment.weight_grams || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, weight_grams: Number(event.target.value || 0) } }))} /></label>
-                          <label>Foto varian<input type="url" value={assignment.photo_url || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, photo_url: event.target.value } }))} placeholder="https://…" /></label>
-                          <label>Penjualan<select value={assignment.sale_mode} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, sale_mode: event.target.value as 'stock' | 'preorder' } }))}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label>
+                          <label>Harga default varian baru {currency}<input type="number" value={assignment.price || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, price: Number(event.target.value || 0) } }))} /></label>
+                          <label>Berat default varian baru (gram)<input type="number" value={assignment.weight_grams || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, weight_grams: Number(event.target.value || 0) } }))} /></label>
+                          <label>Foto default varian baru<input type="url" value={assignment.photo_url || ""} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, photo_url: event.target.value } }))} placeholder="https://…" /></label>
+                          <label>Penjualan default varian baru<select value={assignment.sale_mode} onChange={(event) => setOption1Assignments((current) => ({ ...current, [option1]: { ...assignment, sale_mode: event.target.value as 'stock' | 'preorder' } }))}><option value="preorder">Preorder</option><option value="stock">Ready stock</option></select></label>
                         </div>
                         {option1Variants.length > 0 ? (
                           <div className="variant-matrix-rows">
@@ -1784,8 +1867,8 @@ export function Dashboard() {
                               <div className="variant-matrix-row" key={v.id}>
                                 <div className="variant-photo-preview"><ProductPhoto key={`${v.id}-${v.photo_url}`} variant={v} product={variantProduct} alt={`${variantProduct.name} — ${variantDisplayName(v)}`}/></div>
                                 <div className="variant-editor-fields">
-                                  <label>{variantProduct.option1_label || "Pilihan 1"}<input value={v.option1_value || ""} placeholder="Contoh: Sweater" onChange={e=>{const value=e.target.value;updateVariant(v.id,"option1_value",value);setOption1ValuesText(current=>parseOptionList(current).map(item=>item===option1?value:item).filter(Boolean).join('\n'))}} onBlur={e=>saveVariantOption(v,"option1_value",e.target.value.trim())}/></label>
-                                  <label>{variantProduct.option2_label || "Pilihan 2"}<input value={v.option2_value || ""} placeholder="Contoh: Garret" onChange={e=>updateVariant(v.id,"option2_value",e.target.value)} onBlur={e=>saveVariantOption(v,"option2_value",e.target.value.trim())}/></label>
+                                  <label>{variantProduct.option1_label || "Pilihan 1"}<input value={v.option1_value || ""} placeholder="Contoh: Sweater" onChange={e=>{const value=e.target.value;updateVariant(v.id,"option1_value",value);setOption1ValuesText(current=>parseOptionList(current).map(item=>item===option1?value:item).filter(Boolean).join(', '))}} onBlur={e=>saveVariantOption(v,"option1_value",e.target.value.trim())}/></label>
+                                  <label>{variantProduct.option2_label || "Pilihan 2"}<input value={v.option2_value || ""} placeholder="Contoh: Garret" onChange={e=>{const value=e.target.value;const previous=v.option2_value || '';updateVariant(v.id,"option2_value",value);setOption2ValuesText(current=>parseOptionList(current).map(item=>item===previous?value:item).filter(Boolean).join(', '))}} onBlur={e=>saveVariantOption(v,"option2_value",e.target.value.trim())}/></label>
                                   <label>SKU<input value={v.sku || ""} onChange={e=>updateVariant(v.id,"sku",e.target.value)} onBlur={e=>saveVariant(v.id,"sku",e.target.value.trim())}/></label>
                                   <label>Foto varian<input type="url" aria-label={`Link foto ${variantDisplayName(v)}`} value={v.photo_url || ''} placeholder="https://… (opsional)" onChange={e=>updateVariant(v.id,'photo_url',e.target.value)} onBlur={e=>{const url=e.target.value.trim();if(url&&!/^https?:\/\//i.test(url)){setSyncStatus('Gunakan link foto http atau https');return;}saveVariant(v.id,'photo_url',url)}}/><input type="file" accept="image/jpeg,image/png,image/webp" aria-label={`Upload foto ${variantDisplayName(v)}`} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadVariantPhoto(v,file)}}/><small>Upload file atau tempel link. Kosong memakai foto produk.</small></label>
                                   <label>Harga {currency}<input type="number" value={v.local_price || ""} onChange={e=>updateVariant(v.id,"local_price",Number(e.target.value))} onBlur={e=>saveVariant(v.id,"local_price",Number(e.target.value))}/></label>
@@ -1810,7 +1893,7 @@ export function Dashboard() {
                   tripCountry={activeTrip?.country}
                   sellingPrice={(variant)=>productPricing({local_price:variant.local_price,price_thb:variant.local_price,weight_grams:variant.weight_grams,category:variantProduct.category,margin_percent:variantProduct.margin_percent}).sell}
                 />
-                <div className="editor-danger-zone"><button onClick={async()=>{await deleteProduct(variantProduct.id);closeProductEditor()}}><Trash2 size={14}/> Hapus produk</button></div>
+                <div className="editor-danger-zone"><button onClick={()=>setProductDeleteConfirm({product:variantProduct,step:1,closeEditor:true})}><Trash2 size={14}/> Hapus produk</button></div>
               </div>
             </div>
           </section>
@@ -1907,7 +1990,7 @@ export function Dashboard() {
                         const brandProducts=categoryProducts.filter(p=>(p.brand||"Tanpa brand")===brand);
                         return <div className="catalogue-brand-group" key={brand}>
                           <div className="catalogue-brand-row"><span>BRAND</span><b>{brand}</b><small>{brandProducts.length} produk</small></div>
-                          {brandProducts.map(p=>{const calc=productPricing(p);return <div className="catalogue-row" key={p.id}>
+                          {brandProducts.map(p=>{const calc=productPricing(p);return <div className="catalogue-row catalogue-product-row" key={p.id} role="button" tabIndex={0} aria-label={`Buka editor ${p.name}`} onClick={()=>void openProductEditor(p)} onKeyDown={(event)=>{if(event.target===event.currentTarget&&(event.key==="Enter"||event.key===" ")){event.preventDefault();void openProductEditor(p)}}}>
                             <div className="product-identity"><div className="catalogue-thumb">{p.photo_url?<img src={p.photo_url} alt="" loading="lazy"/>:<PackageSearch size={18}/>}</div><span><b>{p.name}</b><small>{p.product_code}</small></span></div>
                             <span className="catalogue-pill">{p.category}</span>
                             <b>{currencySymbol}{Number(p.local_price||p.price_thb).toLocaleString("id-ID")}</b>
@@ -1915,7 +1998,7 @@ export function Dashboard() {
                             <strong>{format(calc.sell)}<small className="catalogue-profit">Modal {format(calc.capital)}<br/>Profit {format(calc.profit)} / unit</small></strong>
                             <span className={`status-badge ${p.status==="Ready"?"ready":""}`}>{p.status}</span>
                             <span className={`status-badge ${p.published?"live":""}`}>{p.published?"Tayang":"Belum tayang"}</span>
-                            <div className="catalogue-actions"><button className="copy-image-button" disabled={!p.photo_url} title={p.photo_url?"Salin foto untuk ditempel ke Canva":"Belum ada foto"} aria-label={`Salin foto ${p.name}`} onClick={()=>copyProductImage(p)}><Copy size={14}/> Copy image</button><button id={`catalogue-edit-${p.id}`} className="edit-product-button" aria-label={`Edit ${p.name}`} onClick={()=>openProductEditor(p)}><Pencil size={14}/> Edit</button></div>
+                            <div className="catalogue-actions"><button className="duplicate-product-button" disabled={duplicatingProductId!==null} aria-label={`Duplikat ${p.name}`} onClick={(event)=>{event.stopPropagation();void duplicateProduct(p)}}><Copy size={14}/> {duplicatingProductId===p.id?"Menduplikat…":"Duplikat"}</button><button className="delete-product-button" aria-label={`Hapus ${p.name}`} onClick={(event)=>{event.stopPropagation();setProductDeleteConfirm({product:p,step:1,closeEditor:false})}}><Trash2 size={14}/> Hapus</button></div>
                           </div>})}
                         </div>
                       })}
@@ -2512,6 +2595,32 @@ export function Dashboard() {
               </div>
             </section>
           </>
+        )}
+        {productDeleteConfirm && (
+          <div className="modal-backdrop" onMouseDown={()=>!deletingProduct&&setProductDeleteConfirm(null)}>
+            <div className="expense-modal product-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="product-delete-title" onMouseDown={(event)=>event.stopPropagation()}>
+              <div className="modal-title">
+                <div>
+                  <span>HAPUS PRODUK · KONFIRMASI {productDeleteConfirm.step}/2</span>
+                  <h2 id="product-delete-title">{productDeleteConfirm.step===1?"Yakin mau hapus produk ini?":"Konfirmasi terakhir"}</h2>
+                </div>
+                <button disabled={deletingProduct} aria-label="Tutup konfirmasi hapus" onClick={()=>setProductDeleteConfirm(null)}><X size={18}/></button>
+              </div>
+              <div className="product-delete-copy">
+                <strong>{productDeleteConfirm.product.name}</strong>
+                <small>{productDeleteConfirm.product.product_code}</small>
+                <p>{productDeleteConfirm.step===1
+                  ? "Produk dan seluruh variannya akan dihapus dari katalog. Lanjutkan ke konfirmasi terakhir?"
+                  : "Tindakan ini permanen dan tidak bisa dibatalkan. Klik Hapus permanen untuk melanjutkan."}</p>
+              </div>
+              <div className="modal-actions">
+                <button disabled={deletingProduct} onClick={()=>setProductDeleteConfirm(null)}>Batal</button>
+                {productDeleteConfirm.step===1
+                  ? <button className="danger-button" onClick={()=>setProductDeleteConfirm(current=>current?{...current,step:2}:null)}>Lanjut hapus</button>
+                  : <button className="danger-button" disabled={deletingProduct} onClick={()=>void confirmDeleteProduct()}>{deletingProduct?"Menghapus…":"Hapus permanen"}</button>}
+              </div>
+            </div>
+          </div>
         )}
         {tripModal && (
           <div className="modal-backdrop" onMouseDown={() => setTripModal(false)}>

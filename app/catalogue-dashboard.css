@@ -18,7 +18,7 @@
 .catalogue-workspace .catalogue-brand-group .catalogue-row:hover { background:#fbf6f8; }
 .catalogue-workspace .catalogue-row { font-size:12px; }
 .catalogue-workspace .product-identity b { font-size:13px; white-space:normal; line-height:1.4; }
-.catalogue-workspace .status-badge,.catalogue-workspace .edit-product-button { font-size:11px; }
+.catalogue-workspace .status-badge,.catalogue-workspace .duplicate-product-button,.catalogue-workspace .delete-product-button { font-size:11px; }
 .catalogue-workspace .catalogue-category-row[aria-disabled=true] { cursor:default; }
 @media(max-width:1000px) { .dashboard-catalogue-controls { grid-template-columns:repeat(2,minmax(0,1fr)); } .dashboard-catalogue-controls > button { justify-self:start; } }
 @media(max-width:700px) {
@@ -33,7 +33,7 @@
  .catalogue-workspace .product-identity { grid-column:1/-1; }
  .catalogue-workspace .catalogue-row > b::before { content:'Harga asal · '; font-size:10px; color:var(--muted); }
  .catalogue-workspace .catalogue-row > strong::before { content:'Harga jual · '; font-size:10px; color:var(--muted); }
- .catalogue-workspace .edit-product-button { min-height:42px; }
+ .catalogue-workspace .duplicate-product-button,.catalogue-workspace .delete-product-button { min-height:42px; }
 }
 
 .variant-profit { display:grid;gap:5px; }

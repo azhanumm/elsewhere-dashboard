@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getCompatibleOptionValues, findMatchingVariant, getOptionValues, normalizeVariantOptions, variantNameMatchesOptions } from '../lib/variant-selection.js';
+import { cleanOptionValues, getCompatibleOptionValues, findMatchingVariant, getOptionValues, normalizeVariantOptions, variantDetailsForSync, variantNameMatchesOptions } from '../lib/variant-selection.js';
 
 const variants = [
   { id: 'v1', option1_value: 'Violeta', option2_value: 'XXS' },
@@ -60,4 +60,24 @@ await test('legacy combined names can be matched to a new two-dimension combinat
   assert.equal(variantNameMatchesOptions('CaramelCrisp — Large Bag', 'Large Bag', 'Caramel Crisp'), true);
   assert.equal(variantNameMatchesOptions('Chicago Mix — Petite Tin', 'Petite Tin', 'Chicago Mix'), true);
   assert.equal(variantNameMatchesOptions('CheeseCorn — Medium Bag', 'Small Bag', 'Cheese Corn'), false);
+});
+
+await test('an accidentally concatenated option is removed when its original values still exist', () => {
+  assert.deepEqual(
+    cleanOptionValues([
+      'Matcha White Chocolate',
+      'White Chocolate',
+      'Dark Chocolate',
+      'Milk Chocolate',
+      'Matcha White ChocolateWhite ChocolateDark ChocolateMilk Chocolate',
+    ]),
+    ['Matcha White Chocolate', 'White Chocolate', 'Dark Chocolate', 'Milk Chocolate'],
+  );
+});
+
+await test('saving a matrix preserves the current details of an existing variant', () => {
+  const defaults = { local_price: 10, weight_grams: 100, photo_url: 'default.jpg', sale_mode: 'preorder', preorder_capacity: null };
+  const existing = { local_price: 15, weight_grams: 150, photo_url: 'variant.jpg', sale_mode: 'stock', preorder_capacity: 5 };
+  assert.deepEqual(variantDetailsForSync(existing, defaults), existing);
+  assert.equal(variantDetailsForSync(null, defaults), defaults);
 });
