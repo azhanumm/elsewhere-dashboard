@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import {
   type Order,
   createOrderDraftSnapshot,
+  effectiveOrderStatus,
   getOrderLifecycle,
   normalizePhone,
   orderStatuses,
@@ -58,7 +59,7 @@ export default function OrdersPanel({
   const selected = orders.find((o) => o.id === selectedId);
   const shown = orders.filter(
     (o) =>
-      (filter === 'all' || o.status === filter) &&
+      (filter === 'all' || effectiveOrderStatus(o) === filter) &&
       `${o.order_code} ${o.customer_name} ${o.phone}`
         .toLowerCase()
         .includes(query.toLowerCase()),
@@ -144,7 +145,7 @@ export default function OrdersPanel({
                   </span>
                   <b>{rupiah(Number(order.total_idr))}</b>
                   <span>
-                    {orderStatuses[order.status]} · {paymentLabel(order)}
+                    {orderStatuses[effectiveOrderStatus(order)]} · {paymentLabel(order)}
                   </span>
                   <small>
                     {new Date(order.created_at).toLocaleString('id-ID')}
@@ -182,7 +183,8 @@ function OrderDetail({
   const [tracking, setTracking] = useState(order.tracking_number);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'cancelled' | 'return' | 'delete' | null>(null);
+  const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
   const [productPhoto, setProductPhoto] = useState<File | null>(null);
   const [receiptPhoto, setReceiptPhoto] = useState<File | null>(null);
   const [productPhotoPreview, setProductPhotoPreview] = useState<string | null>(null);
@@ -244,7 +246,8 @@ function OrderDetail({
   const visibleStatus = status === 'packed' ? 'arrived' : status;
   const reviewVisibleStatus = reviewStatus === 'packed' ? 'arrived' : reviewStatus;
   const currentStepIndex = internalFlowOrder.indexOf(status);
-  const displayStatus = reviewVisibleStatus ?? visibleStatus;
+  const terminalDisplayStatus = status === 'cancelled' && order.cancellation_type === 'return' ? 'cancelled_returned' : visibleStatus;
+  const displayStatus = reviewVisibleStatus ?? terminalDisplayStatus;
   const displayStatusIndex = visibleFlowOrder.indexOf(displayStatus);
   const currentVisibleIndex = displayStatusIndex >= 0 ? displayStatusIndex : 0;
   const isReviewMode = reviewStatus !== null && reviewStatus !== status;
@@ -307,6 +310,8 @@ function OrderDetail({
     if (error) throw error;
   };
   const paid = paidAmount(order);
+  const canCancelUnpaid = order.status === 'new' && paid === 0;
+  const canCancelReturn = !['cancelled', 'completed'].includes(order.status) && (paid > 0 || order.status !== 'new');
   useEffect(() => {
     const draft: Record<string, string> = {
       ...(savedDraft || {}),
@@ -474,6 +479,7 @@ function OrderDetail({
               {displayStatus === 'shipped' && 'Pesanan sedang dalam proses pengiriman ke customer.'}
               {displayStatus === 'completed' && 'Pesanan sudah diterima customer dan selesai.'}
               {displayStatus === 'cancelled' && 'Pesanan dibatalkan.'}
+              {displayStatus === 'cancelled_returned' && 'Pesanan dibatalkan dan dana/barang dikembalikan kepada customer.'}
             </p>
             <div className="order-status-stepper" aria-label="Order status progression">
               {statusSteps.map((step) => (
@@ -492,6 +498,12 @@ function OrderDetail({
                   {step.label}
                 </button>
               ))}
+              {!['cancelled', 'completed'].includes(order.status) && (
+                <>
+                  <button type="button" className="order-status-step terminal-action" disabled={!canCancelUnpaid || busy} onClick={()=>setConfirmAction('cancelled')}>Cancelled</button>
+                  <button type="button" className="order-status-step terminal-action return" disabled={!canCancelReturn || busy} onClick={()=>setConfirmAction('return')}>Cancel &amp; Return</button>
+                </>
+              )}
             </div>
           </div>
 
@@ -675,47 +687,52 @@ function OrderDetail({
             </p>
           </form>
           <div className="order-admin-actions">
-            {confirmCancel ? (
+            {confirmAction ? (
               <div className="order-delete-confirm">
-                <span>{order.status === 'cancelled' ? 'Hapus order yang sudah dibatalkan ini?' : 'Batalkan order ini?'}</span>
+                <span>{confirmAction === 'cancelled'
+                  ? 'Batalkan order tanpa pembayaran terverifikasi ini?'
+                  : confirmAction === 'return'
+                    ? 'Tandai order sebagai Cancel & Return? Pastikan refund/pengembalian sudah ditangani.'
+                    : deleteStep === 1
+                      ? 'Hapus order terminal ini beserta seluruh item dan catatan pembayarannya?'
+                      : `Konfirmasi terakhir: hapus permanen ${order.order_code}?`}</span>
                 <div>
                   <button
                     type="button"
                     className="danger-button"
                     disabled={busy}
-                    onClick={() =>
-                      action(async () => {
-                        if (order.status === 'cancelled') {
+                    onClick={() => {
+                      if(confirmAction === 'delete' && deleteStep === 1){setDeleteStep(2);return}
+                      void action(async () => {
+                        if (confirmAction === 'delete') {
                           await rpc('commerce_delete_order', { p_order_id: order.id });
                           onChange();
                           return;
                         }
-                        await rpc('commerce_update_order', {
+                        await rpc('commerce_cancel_order', {
                           p_order_id: order.id,
-                          p_status: 'cancelled',
-                          p_courier: '',
-                          p_tracking: '',
+                          p_mode: confirmAction === 'return' ? 'return' : 'unpaid',
                         });
-                      })
-                    }
+                      });
+                    }}
                   >
-                    {order.status === 'cancelled' ? 'Ya, hapus permanen' : 'Ya, hapus'}
+                    {confirmAction === 'cancelled' ? 'Ya, batalkan' : confirmAction === 'return' ? 'Ya, cancel & return' : deleteStep === 1 ? 'Lanjut hapus' : 'Hapus permanen'}
                   </button>
-                  <button type="button" onClick={() => setConfirmCancel(false)}>
+                  <button type="button" onClick={() => {setConfirmAction(null);setDeleteStep(1)}}>
                     Batal
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : order.status === 'cancelled' ? (
               <button
                 type="button"
                 className="mini-delete-button"
-                onClick={() => setConfirmCancel(true)}
+                onClick={() => {setDeleteStep(1);setConfirmAction('delete')}}
                 aria-label="Hapus order"
               >
-                Hapus
+                Hapus permanen
               </button>
-            )}
+            ) : null}
           </div>
         </section>
       </div>

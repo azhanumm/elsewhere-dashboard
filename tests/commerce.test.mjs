@@ -583,4 +583,45 @@ await test('cart checkout creates one atomic order with every product and preser
   assert.equal((await db.query('select count(*)::int as n from orders')).rows[0].n, 1);
   assert.equal((await db.query('select count(*)::int as n from order_items where order_id=$1', [result.order_id])).rows[0].n, 2);
 });
+await test('variant sort migration preserves rows and makes catalogue follow the saved order', async () => {
+  await owner();
+  const anotherVariant = '30000000-0000-4000-8000-000000000003';
+  await db.query(`insert into product_variants(id,product_id,name,local_price,weight_grams,stock,active,sale_mode,preorder_capacity,photo_url,option1_value)
+    values($1,$2,'S',100,500,0,true,'preorder',null,'','S')`, [anotherVariant, product]);
+  await db.exec(await readFile(new URL('../supabase/migrations/202609290001_variant_sort_order.sql', import.meta.url), 'utf8'));
+  await db.query('update product_variants set active=true,sort_order=case when id=$1 then 0 else 1 end where product_id=$2', [anotherVariant, product]);
+
+  const productRow = (await catalogue()).find((row) => row.id === product);
+  assert.deepEqual(productRow.product_variants.map((row) => row.id), [anotherVariant, variant]);
+  assert.equal((await db.query('select count(*)::int as n from product_variants where product_id=$1', [product])).rows[0].n, 2);
+});
+await test('placed orders with only pending payment records can be cancelled and deleted', async () => {
+  await owner();
+  await db.exec(await readFile(new URL('../supabase/migrations/202609290002_order_cancellation_returns.sql', import.meta.url), 'utf8'));
+  const id = crypto.randomUUID();
+  const payment = crypto.randomUUID();
+  await db.query(`insert into orders(id,request_id,order_code,trip_code,customer_name,phone,address,total_idr,status)
+    values($1,$2,'EW-CANCEL-PENDING','TRIP-001','Pending Customer','628111111111','Jalan Pending 123',100000,'new')`, [id, crypto.randomUUID()]);
+  await db.query(`insert into order_payments(id,request_id,order_id,amount_idr,reference,created_by)
+    values($1,$2,$3,100000,'Pending proof',$4)`, [payment, crypto.randomUUID(), id, member]);
+  await role('authenticated', member, 'team@example.com');
+  await db.query("select commerce_cancel_order($1,'unpaid')", [id]);
+  assert.deepEqual((await db.query('select status,cancellation_type from orders where id=$1', [id])).rows[0], { status: 'cancelled', cancellation_type: 'unpaid' });
+  await db.query('select commerce_delete_order($1)', [id]);
+  assert.equal((await db.query('select count(*)::int as n from order_payments where id=$1', [payment])).rows[0].n, 0);
+});
+await test('verified paid dummy orders require cancel and return before permanent deletion', async () => {
+  await owner();
+  const id = crypto.randomUUID();
+  await db.query(`insert into orders(id,request_id,order_code,trip_code,customer_name,phone,address,total_idr,status)
+    values($1,$2,'EW-RETURN-PAID','TRIP-001','Paid Customer','628222222222','Jalan Paid 12345',100000,'new')`, [id, crypto.randomUUID()]);
+  await db.query(`insert into order_payments(request_id,order_id,amount_idr,reference,verified_at,verified_by,created_by)
+    values($1,$2,100000,'Verified dummy',now(),$3,$3)`, [crypto.randomUUID(), id, member]);
+  await role('authenticated', member, 'team@example.com');
+  await assert.rejects(db.query("select commerce_cancel_order($1,'unpaid')", [id]), /tanpa pembayaran/);
+  await db.query("select commerce_cancel_order($1,'return')", [id]);
+  assert.deepEqual((await db.query('select status,cancellation_type from orders where id=$1', [id])).rows[0], { status: 'cancelled', cancellation_type: 'return' });
+  await db.query('select commerce_delete_order($1)', [id]);
+  assert.equal((await db.query('select count(*)::int as n from orders where id=$1', [id])).rows[0].n, 0);
+});
 await db.close();

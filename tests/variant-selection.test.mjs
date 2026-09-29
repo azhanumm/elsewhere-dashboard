@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanOptionValues, getCompatibleOptionValues, findMatchingVariant, getOptionValues, normalizeVariantOptions, variantDetailsForSync, variantNameMatchesOptions } from '../lib/variant-selection.js';
+import { activateVariantCombination, cleanOptionValues, getCompatibleOptionValues, findMatchingVariant, getOptionValues, normalizeVariantOptions, variantDetailsForSync, variantNameMatchesOptions } from '../lib/variant-selection.js';
 
 const variants = [
   { id: 'v1', option1_value: 'Violeta', option2_value: 'XXS' },
@@ -73,6 +73,12 @@ await test('inactive choices stay removed when the editor reloads after save', (
   ];
 
   assert.deepEqual(getOptionValues(rows, 'option1_value'), ['65g']);
+});
+
+await test('checking an inactive combination reactivates it without losing its details', () => {
+  const inactive = { id: 'matcha-65', active: false, option1_value: '65g', option2_value: 'Matcha White Chocolate', local_price: 8, photo_url: 'matcha.jpg' };
+
+  assert.deepEqual(activateVariantCombination(inactive), { ...inactive, active: true });
 });
 
 await test('legacy combined names can be matched to a new two-dimension combination', () => {

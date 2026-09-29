@@ -88,6 +88,7 @@ create table public.product_variants (
   weight_grams int4 default 0 not null,
   stock int4 default 0 not null,
   active bool default true not null,
+  sort_order int4 default 0 not null,
   created_by uuid,
   created_at timestamptz default now() not null,
   updated_at timestamptz default now() not null

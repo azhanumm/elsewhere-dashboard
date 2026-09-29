@@ -41,6 +41,7 @@ export type Order = {
   notes: string;
   total_idr: number;
   status: string;
+  cancellation_type?: 'unpaid' | 'return' | null;
   courier: string;
   tracking_number: string;
   created_at: string;
@@ -60,6 +61,7 @@ export const orderStatuses: Record<string, string> = {
   shipped: 'Shipped to Cust',
   completed: 'Completed',
   cancelled: 'Cancelled',
+  cancelled_returned: 'Cancel & Return',
 };
 export const orderLifecycleStages = [
   { id: 'new', label: 'Placed', phase: 'place', description: 'Order sudah checkout dan bukti pembayaran terkirim' },
@@ -79,30 +81,39 @@ export const paymentLabel = (order: Order) =>
   paidAmount(order) >= Number(order.total_idr)
     ? 'Lunas'
     : 'Belum dibayar';
-export function getOrderLifecycle(order: Pick<Order, 'status' | 'courier' | 'tracking_number'>) {
+export const effectiveOrderStatus = (order: Pick<Order, 'status' | 'cancellation_type'>) =>
+  order.status === 'cancelled' && order.cancellation_type === 'return'
+    ? 'cancelled_returned'
+    : order.status;
+export function getOrderLifecycle(order: Pick<Order, 'status' | 'cancellation_type' | 'courier' | 'tracking_number'>) {
   const stages = [...orderLifecycleStages];
+  const effectiveStatus = effectiveOrderStatus(order);
   const current = stages.find((stage) => stage.id === order.status) ?? stages.find((stage) => stage.id === 'arrived') ?? stages[0];
   const currentIndex = stages.findIndex((stage) => stage.id === current.id);
   const progress = order.status === 'cancelled' ? 0 : Number(((currentIndex + 1) / stages.length).toFixed(2));
   const next = stages[Math.min(currentIndex + 1, stages.length - 1)];
-  const phaseSummary = {
+  const phaseSummary = effectiveStatus === 'cancelled_returned'
+    ? 'Pesanan dibatalkan dan dana/barang dikembalikan kepada customer.'
+    : order.status === 'cancelled'
+      ? 'Pesanan dihentikan sebelum pembayaran terverifikasi.'
+      : ({
     place: 'Pesanan sudah checkout dan menunggu konfirmasi pembayaran.',
     pay: 'Pembayaran sudah diterima dan order siap dilanjutkan ke proses pembelian.',
     shopping: 'Barang sedang diproses, dibeli, dan dipersiapkan dari supplier ke Indonesia.',
     packing: 'Barang sudah sampai di Indonesia dan sedang disiapkan untuk pengiriman.',
     delivery: 'Pengiriman ke customer sedang berjalan sampai pesanan selesai.',
-  }[current.phase] ?? 'Order sedang dipantau.';
+  }[current.phase] ?? 'Order sedang dipantau.');
   return {
     stages,
     current,
     next,
     progress,
     phaseSummary,
-    currentLabel: orderStatuses[order.status] ?? current.label,
+    currentLabel: orderStatuses[effectiveStatus] ?? current.label,
   };
 }
 export function orderWhatsAppTemplates(
-  order: Pick<Order, 'customer_name' | 'order_code' | 'phone' | 'status' | 'courier' | 'tracking_number' | 'total_idr'> & {
+  order: Pick<Order, 'customer_name' | 'order_code' | 'phone' | 'status' | 'cancellation_type' | 'courier' | 'tracking_number' | 'total_idr'> & {
     order_items?: Array<{
       product_name: string;
       variant_name?: string | null;

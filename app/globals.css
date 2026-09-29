@@ -1529,6 +1529,7 @@ main {
 .variant-matrix-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
 .variant-matrix-fields label{display:grid;gap:6px;color:var(--muted);font-size:8px}
 .variant-matrix-fields input,.variant-matrix-fields select{width:100%;min-width:0;height:36px;border:1px solid var(--line);border-radius:7px;padding:0 8px;background:#fff;color:var(--ink);font-size:9px}
+.variant-group-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 10px;border-radius:8px;background:#faf7f7}.variant-group-actions small{color:var(--muted);font-size:8px;line-height:1.4}.variant-group-actions button{flex-shrink:0;border:1px solid var(--plum);border-radius:7px;background:#fff;color:var(--plum);padding:8px 10px;font-size:8px;font-weight:700;cursor:pointer}
 .variant-matrix-rows{display:grid;gap:10px;margin-top:8px}
 .variant-matrix-row{display:flex;gap:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#faf7f7}
 .variant-photo-preview{width:72px;height:72px;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex-shrink:0;background:#f7f1f3;display:grid;place-items:center}
@@ -1540,16 +1541,14 @@ main {
 .variant-editor-list{display:grid;gap:12px;margin-top:14px}
 .variant-editor-row{display:flex;gap:12px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff}
 .variant-editor-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;flex:1;min-width:0}
-.variant-editor-fields label:nth-child(4){grid-column:span 2}
-.variant-editor-fields label:nth-child(9){display:flex;align-items:center;gap:6px;align-self:end}
-.variant-editor-fields .variant-active input{width:auto;height:auto}
-.variant-editor-fields .delete-expense{align-self:end}
+.variant-row-title{grid-column:1/-1;display:flex;align-items:baseline;gap:8px;padding-bottom:2px}.variant-row-title strong{font-size:10px;color:var(--plum)}.variant-row-title small{font-size:8px;color:var(--muted)}
+.variant-editor-fields label:nth-child(3){grid-column:span 2}
 .variant-editor-fields input[type=file]{height:auto;padding:8px}
 .variant-editor-fields small{display:block;color:var(--muted);font-size:8px;line-height:1.4}
 .product-options{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
 .product-options label{display:grid;gap:5px;color:var(--muted);font-size:9px}
 .product-options select{width:100%;border:1px solid var(--line);border-radius:7px;padding:9px;background:#fff;color:var(--ink);font:inherit}
-@media(max-width:700px){.variant-row{min-width:650px}.variant-list{overflow-x:auto}.variant-add{grid-template-columns:1fr 1fr}.variant-add button{min-height:35px}.variant-option-settings{grid-template-columns:1fr}.variant-matrix-save{align-items:stretch;flex-direction:column}.variant-editor-row{flex-direction:column}.variant-editor-fields{grid-template-columns:1fr 1fr}.variant-editor-fields label:nth-child(4){grid-column:span 2}.product-save-bar{left:14px;right:14px;bottom:12px;width:auto;gap:12px}.product-save-bar small{display:none}.product-save-bar button{min-width:96px}}
+@media(max-width:700px){.variant-row{min-width:650px}.variant-list{overflow-x:auto}.variant-add{grid-template-columns:1fr 1fr}.variant-add button{min-height:35px}.variant-option-settings{grid-template-columns:1fr}.variant-matrix-save{align-items:stretch;flex-direction:column}.variant-group-actions{align-items:stretch;flex-direction:column}.variant-editor-row{flex-direction:column}.variant-editor-fields{grid-template-columns:1fr 1fr}.variant-editor-fields label:nth-child(3){grid-column:span 2}.product-save-bar{left:14px;right:14px;bottom:12px;width:auto;gap:12px}.product-save-bar small{display:none}.product-save-bar button{min-width:96px}}
 .catalogue-row > b {
   font-weight: 500;
 }
@@ -1735,6 +1734,9 @@ main {
 .order-status-step.done { background:#7d4d5e !important;color:#fff !important;border-color:#7d4d5e !important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15); }
 .order-status-step.current { background:#fff !important;color:#624153 !important;border:2px solid #624153 !important;box-shadow:none !important; }
 .order-status-step.upcoming { background:#f7f1f3 !important;color:#a28791 !important;border-color:#e1ccd6 !important; }
+.order-status-step.terminal-action { cursor:pointer;background:#fff5f6;color:#923f52;border-color:#deb8c2;opacity:1; }
+.order-status-step.terminal-action.return { background:#fff8ed;color:#845b26;border-color:#e3c895; }
+.order-status-step.terminal-action:disabled { cursor:not-allowed;opacity:.35; }
 .order-status-image-preview { display:grid;gap:8px;padding:10px;border:1px solid #ead5dd;border-radius:10px;background:#fff; }
 .order-status-image-link { display:block;border-radius:8px;overflow:hidden;border:1px solid #e7d6de;background:#faf5f8; }
 .order-status-image-link img { display:block;width:100%;max-height:220px;object-fit:cover; }
