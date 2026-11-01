@@ -1,13 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { ExternalLink, MapPinned } from "lucide-react";
+import { Check, Copy, ExternalLink, MapPinned } from "lucide-react";
 import { routeConfig, routeDays, mapsUrl, dayStopsFromHotel } from "../lib/trip-route-data";
 
 const rm = (n: number) => `RM ${n}`;
+const dayLabel = (d: { day: number; date: string; title: string }) =>
+	`HARI ${d.day} (${new Date(`${d.date}T00:00:00`).toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "short" })})`;
+const waText = () =>
+	`KL 4-8 Nov 2026\nHotel: Grid 9 (Maharajalela)\n\n` + routeDays.map(d => `${dayLabel(d)}\n${d.flow}`).join("\n\n");
 
 export default function TripRoute() {
 	const [active, setActive] = useState(1);
+	const [copied, setCopied] = useState(false);
+	const copyWa = async () => {
+		try { await navigator.clipboard.writeText(waText()); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { setCopied(false); }
+	};
 	const day = routeDays.find(d => d.day === active) ?? routeDays[0];
 	const totalTransport = routeDays.reduce((s, d) => s + d.transportRm, 0);
 	const totalMeals = routeDays.reduce((s, d) => s + d.mealsRm, 0);
@@ -23,6 +31,17 @@ export default function TripRoute() {
 					<span>Mendarat</span><strong>{routeConfig.flight.landing}</strong>
 					<span>Pulang</span><strong>{routeConfig.flight.departure}</strong>
 				</div>
+			</div>
+			<div className="content-calendar">
+				<div className="route-flow-head">
+					<h2>Alur singkat</h2>
+					<button className="content-regenerate" onClick={copyWa}>{copied ? <Check size={14} /> : <Copy size={14} />} {copied ? "Tersalin" : "Salin untuk WA"}</button>
+				</div>
+				<ol className="route-flow">
+					{routeDays.map(d => (
+						<li key={d.day}><strong>{dayLabel(d)}</strong><span>{d.flow}</span></li>
+					))}
+				</ol>
 			</div>
 			<div className="content-calendar">
 				<div className="route-tabs">
