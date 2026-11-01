@@ -48,13 +48,13 @@ export const routeDays: RouteDay[] = [
 		{ time: "16:55", name: "Pavilion KL", note: "90 menit, tutup 22:00", lat: 3.1491, lng: 101.7129, leg: "Jalan kaki" },
 		{ time: "18:30", name: "Kunafa Finger's", note: "Camilan sore, lalu Maghrib dan makan malam", lat: 3.1458, lng: 101.7113, leg: "Jalan kaki" },
 		{ time: "19:55", name: "Don Don Donki (Lot 10)", note: "95 menit, paling akhir, buka sampai 02:00", lat: 3.1468, lng: 101.7118, leg: "Jalan kaki" },
-		{ time: "21:35", name: H.name, note: "Grab ~RM10, QC dan packing, live selling", lat: H.lat, lng: H.lng, leg: "Grab" },
+		{ time: "21:35", name: H.name, note: "Grab ~RM10, QC, packing semua pesanan sampai siap kirim, live selling", lat: H.lat, lng: H.lng, leg: "Grab" },
 	] },
-	{ day: 5, date: "2026-11-08", title: "Kirim paket, top-up Chinatown, pulang", theme: "transit", transportRm: 29, mealsRm: 80, stops: [
-		{ time: "08:00", name: H.name, note: "Serahkan paket ke logistik, check-out 09:15, titip koper (konfirmasi)", lat: H.lat, lng: H.lng },
-		{ time: "09:35", name: "Beryl's + Pasar Seni + Petaling Street", note: "Top-up opsional, toko buka sekitar 10:00 (Beryl's 09:00 akhir pekan)", lat: 3.1440, lng: 101.6967, leg: "Jalan kaki" },
-		{ time: "11:45", name: "KL Sentral", note: "Ambil koper di hotel, Monorail 2 stop", lat: 3.1343, lng: 101.6862, leg: "Monorail" },
-		{ time: "13:45", name: "KLIA2", note: "Skybus 12:30, RM13/orang. Zuhur, Beryl's L3, Garrett L2, bag drop 14:30", lat: 2.7447, lng: 101.6852, leg: "Skybus" },
+	{ day: 5, date: "2026-11-08", title: "Finishing beli, kirim paket, pulang", theme: "transit", transportRm: 29, mealsRm: 80, stops: [
+		{ time: "09:00", name: "Finishing beli (Chinatown atau Imbi / Bukit Bintang)", note: "Barang yang belum terbeli, maksimal 2 area terdekat. Toko buka sekitar 10:00", lat: 3.1440, lng: 101.6967, leg: "Jalan kaki" },
+		{ time: "11:00", name: H.name, note: "Tambah paket dan lakban, serahkan ke logistik (jemput ~11:15), check-out 11:45", lat: H.lat, lng: H.lng },
+		{ time: "11:55", name: "KL Sentral", note: "Monorail 2 stop", lat: 3.1343, lng: 101.6862, leg: "Monorail" },
+		{ time: "13:50", name: "KLIA2", note: "Skybus ~12:35, RM13/orang. Zuhur, Beryl's L3, Garrett L2, bag drop 14:30", lat: 2.7447, lng: 101.6852, leg: "Skybus" },
 		{ time: "17:15", name: "Penerbangan pulang", note: "", lat: 2.7447, lng: 101.6852 },
 	] },
 ];
