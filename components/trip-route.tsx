@@ -52,10 +52,11 @@ export default function TripRoute() {
 					))}
 				</div>
 				<h2>{day.title}</h2>
-				<p className="content-guidance">Transport {rm(day.transportRm)} · makan {rm(day.mealsRm)} (perkiraan untuk 2 orang). Tarif Monorail, Grab dan MRT adalah estimasi.</p>
+				<p className="content-guidance">Transport {rm(day.transportRm)} · makan {rm(day.mealsRm)} (perkiraan untuk 2 orang). Tarif Monorail dan Grab adalah estimasi.</p>
+				<p className="route-legend"><i className="route-konten"/>Toko untuk konten <i className="route-beli"/>Toko untuk beli <i className="route-spot"/>Spot konten <i className="route-lain"/>Hotel / transit</p>
 				<ol className="route-list">
 					{day.stops.map((s, i) => (
-						<li key={`${day.day}-${i}`}>
+						<li key={`${day.day}-${i}`} className={`route-${s.kind}`}>
 							<time>{s.time}</time>
 							<div>
 								<strong>{s.name}</strong>
