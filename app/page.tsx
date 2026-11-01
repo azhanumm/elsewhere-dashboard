@@ -31,6 +31,7 @@ import Landing from "./landing";
 import ProductPhoto from "../components/product-photo";
 import CatalogueImageGenerator from "../components/catalogue-image-generator";
 import ContentPlanGenerator from "../components/content-plan-generator";
+import TripRoute from "../components/trip-route";
 import "./catalogue-dashboard.css";
 import { filterCatalogue, catalogueCategoryNames, type CatalogueStatus } from "../lib/catalogue-search";
 import OrdersPanel from "../components/orders-panel";
@@ -231,7 +232,7 @@ export function Dashboard() {
   const [recoveryMode,setRecoveryMode]=useState(false);
   const [newPassword,setNewPassword]=useState("");
   const [syncStatus, setSyncStatus] = useState("Menunggu login");
-  const [view, setView] = useState<"dashboard" | "trip" | "catalogue" | "product" | "orders" | "content">(
+  const [view, setView] = useState<"dashboard" | "trip" | "catalogue" | "product" | "orders" | "content" | "route">(
     "dashboard",
   );
   const scrollPositions = useRef<Record<string, number>>({
@@ -240,6 +241,7 @@ export function Dashboard() {
     catalogue: 0,
     orders: 0,
     content: 0,
+    route: 0,
   });
   const saveDashboardState = () => {
     if (typeof window === "undefined") return;
@@ -251,7 +253,7 @@ export function Dashboard() {
     }));
   };
   const switchView = (
-    next: "dashboard" | "trip" | "catalogue" | "orders" | "content",
+    next: "dashboard" | "trip" | "catalogue" | "orders" | "content" | "route",
   ) => {
     if (view !== "product") {
       scrollPositions.current[view] = window.scrollY;
@@ -1357,6 +1359,10 @@ export function Dashboard() {
             <MapPinned />
             Trips <em>{String(trips.length).padStart(3, "0")}</em>
           </a>
+          <a className={view === "route" ? "active" : ""} onClick={() => { switchView("route"); setVariantProduct(null); window.history.pushState({}, "", "/dashboard"); setNav(false); }}>
+            <MapPinned />
+            Rute trip
+          </a>
           <p>Growth</p>
           <a className={view === "content" ? "active" : ""} onClick={() => { switchView("content"); setVariantProduct(null); window.history.pushState({}, "", "/dashboard/content"); setNav(false); }}>
             <CalendarDays />
@@ -1437,7 +1443,7 @@ export function Dashboard() {
         </header>
         <div className="commerce-trip-bar"><label>Trip aktif <select value={activeTripCode} onChange={e => { setActiveTripCode(e.target.value); setVariantProduct(null); if(view === "product") switchView("catalogue"); }}>{trips.map(t => <option key={t.code} value={t.code}>{t.name} · {t.code}</option>)}</select></label><a href="/" target="_blank" rel="noreferrer">Lihat katalog ↗</a><output>{syncStatus}</output></div>
         {commerceError && <p role="alert" className="commerce-error">{commerceError}</p>}
-        {view === "content" ? <ContentPlanGenerator products={catalogue} tripCountry={activeTrip?.country} sellingPrice={(product, variant) => productPricing({ local_price: variant?.local_price ?? product.local_price, price_thb: variant?.local_price ?? product.price_thb, weight_grams: variant?.weight_grams ?? product.weight_grams, category: product.category, margin_percent: product.margin_percent }).sell}/> : view === "orders" ? <OrdersPanel key={activeTripCode} tripCode={activeTripCode} onChange={() => setCommerceRevision(n => n + 1)}/> : view === "trip" ? (
+        {view === "route" ? <TripRoute/> : view === "content" ? <ContentPlanGenerator products={catalogue} tripCountry={activeTrip?.country} sellingPrice={(product, variant) => productPricing({ local_price: variant?.local_price ?? product.local_price, price_thb: variant?.local_price ?? product.price_thb, weight_grams: variant?.weight_grams ?? product.weight_grams, category: product.category, margin_percent: product.margin_percent }).sell}/> : view === "orders" ? <OrdersPanel key={activeTripCode} tripCode={activeTripCode} onChange={() => setCommerceRevision(n => n + 1)}/> : view === "trip" ? (
           <section className="trip-workspace">
             <div className="trip-switcher">
               <label>
