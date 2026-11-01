@@ -43,11 +43,10 @@ export const routeDays: RouteDay[] = [
 		{ time: "18:00", name: "Central Market + Kasturi Walk", note: "Magnet, batik", lat: 3.1453, lng: 101.6954, leg: "Jalan kaki" },
 		{ time: "20:30", name: H.name, note: "Sortir tas, live selling", lat: H.lat, lng: H.lng, leg: "Jalan kaki" },
 	] },
-	{ day: 4, date: "2026-11-07", title: "Beli: Imbi, Bukit Bintang, TRX", theme: "beli", transportRm: 18, mealsRm: 116, stops: [
+	{ day: 4, date: "2026-11-07", title: "Beli: Imbi dan Bukit Bintang", theme: "beli", transportRm: 14, mealsRm: 116, stops: [
 		{ time: "10:00", name: "Berjaya Times Square", note: "Monorail 2 stop ke Imbi", lat: 3.1422, lng: 101.7106, leg: "Monorail" },
 		{ time: "12:00", name: "Sungei Wang Plaza", note: "Zuhur di musala, makan siang", lat: 3.1450, lng: 101.7113, leg: "Jalan kaki" },
-		{ time: "14:15", name: "Tudungruffle TRX", note: "MRT Bukit Bintang ke TRX, 1 stop", lat: 3.1424, lng: 101.7188, leg: "MRT" },
-		{ time: "15:45", name: "Pavilion KL", note: "MRT kembali, Asar", lat: 3.1491, lng: 101.7129, leg: "MRT" },
+		{ time: "14:15", name: "Pavilion KL", note: "Asar, Tokyo Milk, kosmetik", lat: 3.1491, lng: 101.7129, leg: "Jalan kaki" },
 		{ time: "18:15", name: "Kunafa Finger's", note: "Camilan sore", lat: 3.1458, lng: 101.7113, leg: "Jalan kaki" },
 		{ time: "19:40", name: "Don Don Donki (Lot 10)", note: "Paling akhir, buka sampai 02:00", lat: 3.1468, lng: 101.7118, leg: "Jalan kaki" },
 		{ time: "21:30", name: H.name, note: "Grab (~RM10), QC dan packing", lat: H.lat, lng: H.lng, leg: "Grab" },
